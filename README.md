@@ -21,7 +21,7 @@ Daten **verschlüsselt** im Repository, **automatischer Sync** zwischen allen Ge
 
 ## Einrichtung (einmalig)
 
-1. *Settings → Pages → Source: GitHub Actions* (privates Repo: GitHub Pro/Team nötig – oder Repo öffentlich schalten; Daten sind verschlüsselt).
+1. *Settings → Pages → Source: Deploy from a branch → `main` / `(root)`* (bereits eingerichtet).
 2. App öffnen, mit dem Team-Passwort entsperren.
 3. Fine-grained Token (nur dieses Repo, *Contents: Read and write*) unter **Daten & Sync → Team-Zugang** hinterlegen.
 4. Team-Passwort unter **Daten & Sync** ändern und im Team teilen.

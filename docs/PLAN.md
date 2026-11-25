@@ -11,13 +11,13 @@ Grundlage war die Excel-Liste `Filamentbestand.xlsx` (31 Positionen, 64 Rollen, 
 
 | # | Anforderung | Umsetzung |
 |---|---|---|
-| A1 | WebApp, über Git gehostet | Statische Seite (HTML/CSS/JS, kein Build) auf GitHub Pages, Deployment per GitHub Actions |
+| A1 | WebApp, über Git gehostet | Statische Seite (HTML/CSS/JS, kein Build) auf GitHub Pages, direkt aus Branch `main` (Root) |
 | A2 | Basis: Excel-Liste | Alle 31 Positionen inkl. Gruppierung (ecoPLA+/PLA+-Varianten → PLA+, TPU-Härten/VarioShore → TPU) übernommen |
 | A3 | Dark Mode | Durchgängig dunkles Farbschema, `color-scheme: dark`, dunkle Scrollbars, Theme-Color |
 | A4 | Auswählbare Filamentsorten | Auswahllisten für Typ, Sorte, Farbe, Hersteller (jeweils mit „Neu …“), Sorte wird aus Typ vorgeschlagen, Sorten-Zuordnung pflegbar |
 | A5 | Sortierungen | Klick auf jede Spalte (auf-/absteigend), auf dem Handy Sortier-Auswahl |
 | A6 | Statistiken | Kennzahlen, kg/Rollen je Sorte, Rollen je Farbe/Hersteller/Rollengröße, knapper Bestand, Verbrauch & Zugänge (12 Wochen), Änderungen je Person, Verlauf |
-| A7 | Auf `main`, online | `main` ist Standardbranch, Pages-Workflow deployed bei Push |
+| A7 | Auf `main`, online | `main` ist Standardbranch, Pages veröffentlicht `main` bei jedem Push automatisch |
 | A8 | Plan im Repo | Dieses Dokument |
 | A9 | Änderungen einzelner Personen automatisch speichern | Jede Änderung wird sofort lokal gesichert und automatisch ins Repo übertragen; Name der Person im Verlauf; Merge gleichzeitiger Änderungen |
 | A10 | Cloud-Symbol für Sync-Status | Cloud-Button oben rechts mit Zuständen *Aktuell*, *Sync …*, *Ausstehend (n)*, *Offline*, *Nur lokal*, *Fehler*, *gesperrt* |
@@ -38,9 +38,8 @@ Browser (Windows / Android / iPhone)
 ```
 
 - **Kein Server, kein Build.** Alles läuft im Browser; GitHub ist Hosting und Datenspeicher.
-- **Pages-Deployment** (`.github/workflows/pages.yml`) bei jedem Push auf `main`, **außer** wenn nur
-  `data/filamente.enc.json` geändert wurde – Bestandsänderungen lösen also kein Redeployment aus,
-  die App liest den aktuellen Stand live über die API.
+- **Pages-Deployment:** *Deploy from a branch* (`main`, Root). GitHub veröffentlicht jeden Push automatisch (`.nojekyll` verhindert Jekyll-Verarbeitung).
+  Auch Bestands-Commits lösen ein kurzes Redeployment aus – unschädlich, denn die App liest den aktuellen Stand ohnehin live über die API.
 
 ### Dateien
 
@@ -178,10 +177,8 @@ Getestet (Playwright/Chromium): Desktop 1366×768 und 1400×1000, iPhone 13, Pix
 
 ## 9. Inbetriebnahme
 
-1. **Pages aktivieren:** Repo → *Settings → Pages → Build and deployment → Source: GitHub Actions*.
-   Hinweis: Das Repo ist privat – Pages für private Repos erfordert GitHub Pro/Team/Enterprise.
-   Alternative: Repo öffentlich schalten (Daten sind verschlüsselt).
-2. Workflow „Deploy to GitHub Pages“ unter *Actions* einmal manuell starten (oder beliebigen Push auf `main`).
+1. **Pages:** *Settings → Pages → Source: Deploy from a branch → `main` / `(root)`* (eingerichtet).
+2. Nach jedem Push ist die neue Version nach ca. 1 Minute online.
 3. App öffnen: `https://cortress.github.io/filamentbestand/`, mit dem Initial-Passwort entsperren.
 4. **Team-Token anlegen:** GitHub → *Settings → Developer settings → Fine-grained tokens* →
    Repository access: nur `cortress/filamentbestand` → Permissions: *Contents: Read and write* → Ablaufdatum setzen.
