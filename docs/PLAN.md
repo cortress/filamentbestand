@@ -26,6 +26,7 @@ Grundlage war die Excel-Liste `Filamentbestand.xlsx` (31 Positionen, 64 Rollen, 
 | A13 | Auswahl per Kästchen, Bulk-Löschen | Checkbox je Zeile/Karte + „alle sichtbaren“, Aktionsleiste: Löschen (mit Rückgängig), −1/+1 Rolle |
 | A15 | Resin für Resindrucker, eigener Bereich | Tab „Resin“: Flaschen, Inhalt je Flasche (kg/L), Resin-Typen, MHD mit Warnung, eigene Statistik |
 | A16 | „In Verwendung“ für geöffnete FDM-Rollen (AMS/Drucker) | Tab „In Verwendung“: Drucker mit AMS-Plätzen, Rollen öffnen/einlegen, Restmenge in %, Regal für angebrochene Rollen |
+| A17 | Bestellungen vermerken, „Erhalten“ bucht automatisch ins Inventar | Tab „Bestellungen“: Lieferant, Nr., Datum, Liefertermin, Positionen (Filament/Resin, Menge, Preis); Erhalten je Position oder komplett → Lager +Menge bzw. neuer Eintrag |
 | A14 | Hinzufügen per Foto (Lieferschein / Etikett) mit Texterkennung | Kamera oder Bildauswahl → lokale OCR (Tesseract.js) bzw. optional KI (Claude) → Prüfliste → Übernahme (vorhandene Einträge werden aufgestockt) |
 
 ## 3. Architektur
@@ -71,6 +72,7 @@ Browser (Windows / Android / iPhone)
   "resin": [{ "id": "…", "typ": "ABS-Like", "farbe": "Grau", "hersteller": "Elegoo", "rollen": 3, "kgProRolle": 1, "mhd": "2027-06" }],
   "inUse": [{ "id": "…", "ref": "f001", "typ": "PLA+", "farbe": "Weiß", "kgProRolle": 1, "rest": 40, "drucker": "<id>", "slot": "A2", "geoeffnet": "ISO" }],
   "drucker": [{ "id": "…", "name": "X1C Links", "slots": 4, "ext": true }],
+  "bestellungen": [{ "id": "…", "bid": "…", "kat": "filamente", "typ": "PLA+", "farbe": "Schwarz", "hersteller": "eSun", "menge": 4, "kgProRolle": 1, "preis": 79.96, "lieferant": "3DJake", "bestellnr": "A-1001", "bestellt": "2026-11-25", "erwartet": "2026-11-28", "status": "offen" }],
   "verlauf": [{ "t": "ISO", "wer": "Anna", "text": "−1 Rolle (verbraucht): PLA+ · Weiß (eSun)", "kg": -3 }]
 }
 ```
@@ -181,7 +183,19 @@ Eigener Tab mit derselben Tabelle wie Filament (Suche, Filter, Sortierung, Auswa
 - KPIs: geöffnete Rollen, Rest gesamt, im Drucker, freie Plätze, fast leer (≤ 15 %); der Filament-Tab zeigt zusätzlich „In Verwendung“.
 - Datenmodell: `inUse[]` (Typ, Farbe, Hersteller, kg/Rolle, `rest` %, `drucker`, `slot`, `geoeffnet`, `ref` → Lagereintrag) und `drucker[]`; alle Änderungen als Operationen mit Merge.
 
-## 10. Geräte-Optimierung
+## 10. Bestellungen
+
+- **Erfassen:** „+ Bestellung“ oder direkt aus dem Bestand: 🛒 je Zeile bzw. Mehrfachauswahl → „🛒 Bestellen“ (vorbefüllt; Menge = bis über den Mindestbestand).
+  Kopf: Lieferant/Shop, Bestell-Nr., bestellt am, Lieferung erwartet, Bemerkung. Positionen: Art (Filament/Resin), Typ, Farbe, Hersteller, Menge, kg je Rolle/Flasche, Preis (optional).
+  Jede Position zeigt schon beim Erfassen, ob sie bei Erhalt **zu einem vorhandenen Lagereintrag addiert** oder **neu angelegt** wird.
+- **Übersicht:** Karten je Bestellung mit Status *offen / teilweise erhalten / erhalten / storniert*, überfällige Liefertermine rot. Filter Offen/Erhalten/Alle, Suche.
+  Zähler am Tab (offene Bestellungen); im Bestand steht an passenden Zeilen „📦 +n bestellt“ und die KPI „Bestellt“.
+- **Wareneingang:** „✓ Erhalten“ je Position oder „✓ Alles erhalten“ → Lagerbestand +Menge (gleicher Typ, Farbe, Hersteller, Inhalt, bei Filament Durchmesser) bzw. neuer Eintrag
+  (Filament-Sorte wird aus dem Typ abgeleitet). Verlauf: „Bestellung erhalten (Lieferant): +n …“ mit kg als Zugang. **Rückgängig** über die Meldung.
+- **Bearbeiten/Stornieren** offener Bestellungen; erledigte Bestellungen können aus der Liste entfernt werden (Inventar bleibt unverändert).
+- Datenmodell: `bestellungen[]` – eine Zeile je Position, Positionen einer Bestellung teilen `bid`; Status-/Mengenänderungen als Operationen (Merge-fähig).
+
+## 11. Geräte-Optimierung
 
 **Windows-PC**
 - Schrift *Segoe UI Variable*, dunkle Scrollbars (Chromium/Edge & Firefox), sichtbarer Tastaturfokus.
@@ -199,7 +213,7 @@ Eigener Tab mit derselben Tabelle wie Filament (Suche, Filter, Sortierung, Auswa
 
 Getestet (Playwright/Chromium): Desktop 1366×768 und 1400×1000, iPhone 13, Pixel 7 – ohne horizontales Scrollen.
 
-## 11. Inbetriebnahme
+## 12. Inbetriebnahme
 
 1. **Pages:** *Settings → Pages → Source: Deploy from a branch → `main` / `(root)`* (eingerichtet).
 2. Nach jedem Push ist die neue Version nach ca. 1 Minute online.
@@ -210,7 +224,7 @@ Getestet (Playwright/Chromium): Desktop 1366×768 und 1400×1000, iPhone 13, Pix
 5. **Team-Passwort ändern** (Daten & Sync) und an das Team weitergeben.
 6. Auf Handys/PC „Zum Startbildschirm hinzufügen“ bzw. „App installieren“.
 
-## 12. Betrieb
+## 13. Betrieb
 
 - **Backup/Klartext-Export:** in der App *Export JSON/CSV* oder
   `node tools/crypt.mjs decrypt data/filamente.enc.json > backup.json` (fragt nach dem Passwort).
@@ -218,7 +232,7 @@ Getestet (Playwright/Chromium): Desktop 1366×768 und 1400×1000, iPhone 13, Pix
 - **Gerät verloren:** Team-Passwort ändern (macht gespeicherte Schlüssel ungültig) und ggf. Token neu erstellen.
 - **Rate-Limit:** 5 000 Anfragen/h pro Token; Abgleich alle 20 s mit ETag (304 zählt nicht) reicht für ein Team problemlos.
 
-## 13. Tests
+## 14. Tests
 
 | Test | Ergebnis |
 |---|---|
@@ -240,12 +254,14 @@ Getestet (Playwright/Chromium): Desktop 1366×768 und 1400×1000, iPhone 13, Pix
 | Drucker anlegen (4 + Ext, 8 Plätze → 13 Plätze), Rolle öffnen (Lager 5 → 4), Platz belegen | ✔ |
 | Rest 100 → 25 % bei 3-kg-Rolle bucht 2,25 kg Verbrauch; ins Regal; leer entfernen bucht Rest | ✔ |
 | Mehrbenutzer-Merge und Konfliktauflösung mit erweitertem Datenmodell | ✔ |
+| Bestellung aus Bestand (🛒) mit 3 Positionen (Filament vorhanden, Resin neu, Filament neu), Überfällig-Markierung, „+4 bestellt“ im Bestand | ✔ Desktop & iPhone |
+| Erhalten einzeln (Lager 2 → 6) + Rückgängig, „Alles erhalten“ legt neue Einträge an, Mehrfach-Bestellung aus Auswahl | ✔ |
 
 Die KI-Erkennung wurde nicht live getestet (kein API-Key in der Testumgebung).
 
 Die Tests liefen gegen eine simulierte GitHub-API; der erste echte Abgleich erfolgt nach Hinterlegen des Tokens.
 
-## 14. Mögliche Erweiterungen
+## 15. Mögliche Erweiterungen
 
 - Service Worker für vollständige Offline-Nutzung der App-Dateien.
 - Restgewicht angebrochener Rollen (Waage/Prozent).

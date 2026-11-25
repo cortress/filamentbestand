@@ -19,6 +19,7 @@ Daten **verschlüsselt** im Repository, **automatischer Sync** zwischen allen Ge
 - 📷 Hinzufügen per Foto von Lieferschein oder Rollen-Etikett – lokale Texterkennung oder optional KI (Claude), mit Prüfliste vor dem Übernehmen
 - 🧪 **Resin** als eigener Bereich: Flaschen, Inhalt, Resin-Typen, Mindesthaltbarkeit mit Warnung, eigene Statistik
 - 🖨 **In Verwendung**: Drucker mit AMS-Plätzen, geöffnete Rollen einlegen/verschieben, Restmenge in %, Regal für angebrochene Rollen – Verbrauch wird automatisch gebucht
+- 📦 **Bestellungen**: Bestellungen mit Positionen vermerken (auch direkt aus dem Bestand), Liefertermin/Überfällig, „✓ Erhalten“ bucht automatisch ins Inventar
 - Installierbar als App (Startbildschirm), CSV/JSON-Export & -Import
 
 ## Einrichtung (einmalig)
