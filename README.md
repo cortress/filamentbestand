@@ -17,6 +17,8 @@ Daten **verschlüsselt** im Repository, **automatischer Sync** zwischen allen Ge
 - AES-256-GCM-Verschlüsselung (Team-Passwort), nichts im Klartext im Repo oder im Browser-Speicher
 - Mehrfachauswahl per Kästchen: Löschen (mit Rückgängig), ±1 Rolle für alle ausgewählten
 - 📷 Hinzufügen per Foto von Lieferschein oder Rollen-Etikett – lokale Texterkennung oder optional KI (Claude), mit Prüfliste vor dem Übernehmen
+- 🧪 **Resin** als eigener Bereich: Flaschen, Inhalt, Resin-Typen, Mindesthaltbarkeit mit Warnung, eigene Statistik
+- 🖨 **In Verwendung**: Drucker mit AMS-Plätzen, geöffnete Rollen einlegen/verschieben, Restmenge in %, Regal für angebrochene Rollen – Verbrauch wird automatisch gebucht
 - Installierbar als App (Startbildschirm), CSV/JSON-Export & -Import
 
 ## Einrichtung (einmalig)

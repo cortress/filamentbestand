@@ -24,6 +24,8 @@ Grundlage war die Excel-Liste `Filamentbestand.xlsx` (31 Positionen, 64 Rollen, 
 | A11 | Gespeicherte Stände verschlüsselt | AES-256-GCM, Schlüssel aus Team-Passwort (PBKDF2-SHA256, 600 000 Iterationen); im Repo und im Browser kein Klartext |
 | A12 | Optimiert für Windows-PC, Android, iPhone | Responsive Layout, PWA-Manifest, Safe-Areas, Touch-Ziele, iOS-Zoom-Schutz, Windows-Scrollbars/Fonts |
 | A13 | Auswahl per Kästchen, Bulk-Löschen | Checkbox je Zeile/Karte + „alle sichtbaren“, Aktionsleiste: Löschen (mit Rückgängig), −1/+1 Rolle |
+| A15 | Resin für Resindrucker, eigener Bereich | Tab „Resin“: Flaschen, Inhalt je Flasche (kg/L), Resin-Typen, MHD mit Warnung, eigene Statistik |
+| A16 | „In Verwendung“ für geöffnete FDM-Rollen (AMS/Drucker) | Tab „In Verwendung“: Drucker mit AMS-Plätzen, Rollen öffnen/einlegen, Restmenge in %, Regal für angebrochene Rollen |
 | A14 | Hinzufügen per Foto (Lieferschein / Etikett) mit Texterkennung | Kamera oder Bildauswahl → lokale OCR (Tesseract.js) bzw. optional KI (Claude) → Prüfliste → Übernahme (vorhandene Einträge werden aufgestockt) |
 
 ## 3. Architektur
@@ -58,7 +60,7 @@ Browser (Windows / Android / iPhone)
 
 ```json
 {
-  "version": 2,
+  "version": 3,
   "aktualisiert": "ISO-Zeitstempel",
   "typen": { "PLA+ Matte": "PLA+", "TPU 95A": "TPU" },
   "filamente": [{
@@ -66,6 +68,9 @@ Browser (Windows / Android / iPhone)
     "hersteller": "eSun", "rollen": 4, "kgProRolle": 1, "durchmesser": 1.75,
     "mindestbestand": 0, "lagerort": "", "bemerkung": ""
   }],
+  "resin": [{ "id": "…", "typ": "ABS-Like", "farbe": "Grau", "hersteller": "Elegoo", "rollen": 3, "kgProRolle": 1, "mhd": "2027-06" }],
+  "inUse": [{ "id": "…", "ref": "f001", "typ": "PLA+", "farbe": "Weiß", "kgProRolle": 1, "rest": 40, "drucker": "<id>", "slot": "A2", "geoeffnet": "ISO" }],
+  "drucker": [{ "id": "…", "name": "X1C Links", "slots": 4, "ext": true }],
   "verlauf": [{ "t": "ISO", "wer": "Anna", "text": "−1 Rolle (verbraucht): PLA+ · Weiß (eSun)", "kg": -3 }]
 }
 ```
@@ -157,7 +162,26 @@ Parser-Heuristik (`recognize.js`): erkennt ~45 Hersteller, Materialtypen inkl. V
 Farben auf Deutsch/Englisch/Französisch, Gewicht (g/kg), Durchmesser, Mengen („3 Stk“, „2x“, „Menge: 2“, Menge vor Preisspalten); Positionsnummern
 werden nicht als Menge gewertet.
 
-## 8. Geräte-Optimierung
+## 8. Resin
+
+Eigener Tab mit derselben Tabelle wie Filament (Suche, Filter, Sortierung, Auswahl/Bulk, ±), aber:
+- Einheit **Flaschen**, Menge **je Flasche in kg bzw. L**; Typen: Standard, ABS-Like, Water-Washable, Tough, Flexible, 8K, Plant-Based, High-Temp, Clear, Dental, Castable, Engineering (+ eigene).
+- **MHD** (Monat/Jahr) je Eintrag: ≤ 2 Monate → gelb „bald“, überschritten → rot „abgelaufen“; „Nur knapp“ zeigt auch MHD-Warnungen.
+- Statistik-Abschnitt „Resin“: Flaschen, Menge, Verbrauch 30 Tage, MHD-Warnungen, Menge je Typ, Flaschen je Farbe, Haltbarkeitsliste.
+- Resin-Buchungen werden im Verlauf markiert und nicht in die Filament-Verbrauchsstatistik gerechnet. Foto-Erfassung ist nur für Filament.
+
+## 9. In Verwendung (geöffnete Rollen)
+
+- **Drucker verwalten:** Name, Anzahl AMS-Plätze (4 je AMS → A1–A4, B1–B4 …; 1 = „Spule“; 0 = ohne AMS) und externe Spule („Ext“).
+- **Rolle öffnen:** In der Filament-Tabelle ⏏ oder im Tab „In Verwendung“ auf einen freien Platz / „+ Rolle einlegen“.
+  Neue Rolle → Lagerbestand −1 (kein Verbrauch), geöffnete Rolle mit 100 % wird dem Platz zugeordnet. Ist der Platz belegt, wandert die bisherige Rolle ins Regal.
+- **Restmenge:** Platz antippen → Schieberegler bzw. 100/75/50/25/10 %. Eine Verringerung wird als **Verbrauch** gebucht (z. B. 3-kg-Rolle 100 → 25 % = 2,25 kg).
+- **Verschieben:** anderer Drucker/Platz oder **Regal** („Angebrochen, nicht im Drucker“).
+- **Leer – entfernen:** bucht die Restmenge als Verbrauch (mit Rückgängig). **Ungeöffnet zurück ins Lager:** bei 100 % → Lagerbestand +1.
+- KPIs: geöffnete Rollen, Rest gesamt, im Drucker, freie Plätze, fast leer (≤ 15 %); der Filament-Tab zeigt zusätzlich „In Verwendung“.
+- Datenmodell: `inUse[]` (Typ, Farbe, Hersteller, kg/Rolle, `rest` %, `drucker`, `slot`, `geoeffnet`, `ref` → Lagereintrag) und `drucker[]`; alle Änderungen als Operationen mit Merge.
+
+## 10. Geräte-Optimierung
 
 **Windows-PC**
 - Schrift *Segoe UI Variable*, dunkle Scrollbars (Chromium/Edge & Firefox), sichtbarer Tastaturfokus.
@@ -175,7 +199,7 @@ werden nicht als Menge gewertet.
 
 Getestet (Playwright/Chromium): Desktop 1366×768 und 1400×1000, iPhone 13, Pixel 7 – ohne horizontales Scrollen.
 
-## 9. Inbetriebnahme
+## 11. Inbetriebnahme
 
 1. **Pages:** *Settings → Pages → Source: Deploy from a branch → `main` / `(root)`* (eingerichtet).
 2. Nach jedem Push ist die neue Version nach ca. 1 Minute online.
@@ -186,7 +210,7 @@ Getestet (Playwright/Chromium): Desktop 1366×768 und 1400×1000, iPhone 13, Pix
 5. **Team-Passwort ändern** (Daten & Sync) und an das Team weitergeben.
 6. Auf Handys/PC „Zum Startbildschirm hinzufügen“ bzw. „App installieren“.
 
-## 10. Betrieb
+## 12. Betrieb
 
 - **Backup/Klartext-Export:** in der App *Export JSON/CSV* oder
   `node tools/crypt.mjs decrypt data/filamente.enc.json > backup.json` (fragt nach dem Passwort).
@@ -194,7 +218,7 @@ Getestet (Playwright/Chromium): Desktop 1366×768 und 1400×1000, iPhone 13, Pix
 - **Gerät verloren:** Team-Passwort ändern (macht gespeicherte Schlüssel ungültig) und ggf. Token neu erstellen.
 - **Rate-Limit:** 5 000 Anfragen/h pro Token; Abgleich alle 20 s mit ETag (304 zählt nicht) reicht für ein Team problemlos.
 
-## 11. Tests
+## 13. Tests
 
 | Test | Ergebnis |
 |---|---|
@@ -212,11 +236,16 @@ Getestet (Playwright/Chromium): Desktop 1366×768 und 1400×1000, iPhone 13, Pix
 | Foto Etikett (eSun PLA+ Weiß 1 kg) per lokaler OCR | ✔ |
 | Zuordnung zu vorhandenem Eintrag vs. neuer Eintrag | ✔ |
 
+| Resin anlegen (Typ, Farbe, Hersteller, Flaschen, MHD), MHD-Warnung „abgelaufen“ | ✔ Desktop & iPhone |
+| Drucker anlegen (4 + Ext, 8 Plätze → 13 Plätze), Rolle öffnen (Lager 5 → 4), Platz belegen | ✔ |
+| Rest 100 → 25 % bei 3-kg-Rolle bucht 2,25 kg Verbrauch; ins Regal; leer entfernen bucht Rest | ✔ |
+| Mehrbenutzer-Merge und Konfliktauflösung mit erweitertem Datenmodell | ✔ |
+
 Die KI-Erkennung wurde nicht live getestet (kein API-Key in der Testumgebung).
 
 Die Tests liefen gegen eine simulierte GitHub-API; der erste echte Abgleich erfolgt nach Hinterlegen des Tokens.
 
-## 12. Mögliche Erweiterungen
+## 14. Mögliche Erweiterungen
 
 - Service Worker für vollständige Offline-Nutzung der App-Dateien.
 - Restgewicht angebrochener Rollen (Waage/Prozent).
