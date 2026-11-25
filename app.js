@@ -107,6 +107,7 @@
   let ui = { q: '', gruppe: '', farbe: '', hersteller: '', knapp: false, sort: { key: 'gruppe', dir: 1 }, view: 'bestand', ...lsGet(LS_UI, {}) };
   const sync = { state: 'locked', last: null, msg: '', busy: false, again: false, timer: null, poll: null };
   let editingId = null;
+  const selected = new Set();
 
   function emptyData() { return { version: 2, aktualisiert: null, typen: { ...STANDARD_TYPEN }, filamente: [], verlauf: [] }; }
 
@@ -155,10 +156,16 @@
     return data;
   }
 
-  function commit(op, text, kg = 0) {
-    op.t = new Date().toISOString();
-    if (text) op.log = { t: op.t, wer: me || '?', text, kg: Math.round(kg * 1000) / 1000 };
-    pending.push(op);
+  function commit(op, text, kg = 0) { commitAll([[op, text, kg]]); }
+  /** Mehrere Operationen auf einmal (Bulk-Aktionen, Foto-Import) – ein Render, ein Sync. */
+  function commitAll(list) {
+    if (!list.length) return;
+    const t = new Date().toISOString();
+    for (const [op, text, kg = 0] of list) {
+      op.t = t;
+      if (text) op.log = { t, wer: me || '?', text, kg: Math.round(kg * 1000) / 1000 };
+      pending.push(op);
+    }
     recompute();
     saveCache();
     render();
@@ -355,11 +362,19 @@
     if (!t.ok) throw new Error('Token ungültig oder ohne Zugriff auf ' + CFG.owner + '/' + CFG.repo);
     const perm = (await t.json()).permissions;
     if (perm && !perm.push) throw new Error('Token hat kein Schreibrecht (Contents: Read and write).');
+    await saveTeam({ token: tok }, tok);
+  }
+  /** Schreibt den (verschlüsselten) Team-Zugang mit geänderten Feldern ins Repo. */
+  async function saveTeam(patch, tok = team.token) {
+    if (!tok) throw new Error('Zuerst einen GitHub-Token hinterlegen.');
     const cur = await ghGet(CFG.teamPath, { tok });
-    const env = await Crypto.encrypt(key, salt, 'team', { ...team, token: tok });
-    const put = await ghPut(CFG.teamPath, env, cur.sha, 'Team-Zugang aktualisiert', tok);
+    let remoteTeam = {};
+    if (cur.env) { try { remoteTeam = await Crypto.decrypt(key, cur.env); } catch { /* neu */ } }
+    const next = { ...remoteTeam, ...team, ...patch };
+    Object.keys(next).forEach(k => { if (next[k] === null) delete next[k]; });
+    const put = await ghPut(CFG.teamPath, await Crypto.encrypt(key, salt, 'team', next), cur.sha, 'Team-Zugang aktualisiert', tok);
     if (put.conflict) throw new Error('Konflikt beim Speichern – bitte erneut versuchen.');
-    team.token = tok; teamSha = put.sha;
+    team = next; teamSha = put.sha;
   }
 
   async function changePassword(pw) {
@@ -448,7 +463,8 @@
       th.setAttribute('aria-sort', th.dataset.sort === ui.sort.key ? (ui.sort.dir > 0 ? 'ascending' : 'descending') : 'none');
     });
     $('#tbody').innerHTML = list.map(f => `
-      <tr data-id="${esc(f.id)}" class="${isLow(f) ? 'low' : ''} ${f.rollen === 0 ? 'zero' : ''}">
+      <tr data-id="${esc(f.id)}" class="${isLow(f) ? 'low' : ''} ${f.rollen === 0 ? 'zero' : ''} ${selected.has(f.id) ? 'selected' : ''}">
+        <td class="sel"><input type="checkbox" class="rowsel" aria-label="${esc(label(f))} auswählen"${selected.has(f.id) ? ' checked' : ''}></td>
         <td class="first">${swatch(f)}<span class="fname">${esc(f.farbe || '–')}</span>${isLow(f) ? '<span class="warnmark" title="Mindestbestand erreicht">⚠ knapp</span>' : ''}<span class="m-typ">${esc(f.typ)}</span></td>
         <td data-l="Typ" class="col-typ">${esc(f.typ)}</td>
         <td data-l="Sorte"><span class="badge">${esc(f.gruppe)}</span></td>
@@ -462,7 +478,11 @@
       </tr>`).join('');
     $('#empty').hidden = list.length > 0;
     const sumR = list.reduce((s, f) => s + f.rollen, 0), sumKg = list.reduce((s, f) => s + gesamt(f), 0);
-    $('#tfoot').innerHTML = list.length ? `<tr><td colspan="4">${list.length} Einträge${list.length !== db.filamente.length ? ` (von ${db.filamente.length})` : ''}</td><td class="num">${fmt(sumR, 0)} Rollen</td><td class="hide-m"></td><td class="num">${fmt(sumKg)} kg</td><td colspan="3" class="hide-m"></td></tr>` : '';
+    $('#tfoot').innerHTML = list.length ? `<tr><td class="hide-m"></td><td colspan="4">${list.length} Einträge${list.length !== db.filamente.length ? ` (von ${db.filamente.length})` : ''}</td><td class="num">${fmt(sumR, 0)} Rollen</td><td class="hide-m"></td><td class="num">${fmt(sumKg)} kg</td><td colspan="3" class="hide-m"></td></tr>` : '';
+    const allSel = $('#selAll'), nSel = list.filter(f => selected.has(f.id)).length;
+    allSel.checked = list.length > 0 && nSel === list.length;
+    allSel.indeterminate = nSel > 0 && nSel < list.length;
+    renderBulk();
     const all = db.filamente, low = all.filter(isLow).length;
     $('#kpiBestand').innerHTML = kpiHtml([
       ['Rollen', fmt(all.reduce((s, f) => s + f.rollen, 0), 0)],
@@ -471,6 +491,33 @@
       ['Hersteller', uniq('hersteller').filter(h => h !== '–').length],
       ['Knapp / leer', `${low} / ${all.filter(f => f.rollen === 0).length}`, '', low ? 'warn' : '']
     ]);
+  }
+
+  function renderBulk() {
+    const ids = new Set(db.filamente.map(f => f.id));
+    [...selected].forEach(id => { if (!ids.has(id)) selected.delete(id); });
+    $('#bulkbar').hidden = selected.size === 0;
+    $('#bulkCount').textContent = selected.size;
+    document.body.classList.toggle('has-sel', selected.size > 0);
+  }
+
+  function bulkAction(act) {
+    const items = db.filamente.filter(f => selected.has(f.id));
+    if (act === 'clear') { selected.clear(); renderTable(); return; }
+    if (!items.length) return;
+    if (act === 'inc' || act === 'dec') {
+      const d = act === 'inc' ? 1 : -1;
+      const ops = items.filter(f => f.rollen + d >= 0).map(f => [{ op: 'delta', id: f.id, d }, `${d > 0 ? '+1 Rolle' : '−1 Rolle (verbraucht)'}: ${label(f)}`, d * f.kgProRolle]);
+      commitAll(ops);
+      toast(`${ops.length} Einträge: ${d > 0 ? '+1' : '−1'} Rolle.`);
+    }
+    if (act === 'del') {
+      if (!confirm(`${items.length} Einträge wirklich löschen?\n\n${items.slice(0, 8).map(label).join('\n')}${items.length > 8 ? '\n…' : ''}`)) return;
+      const copies = items.map(clone);
+      commitAll(items.map(f => [{ op: 'del', id: f.id }, `Gelöscht: ${label(f)}`, -gesamt(f)]));
+      selected.clear(); renderTable();
+      toast(`${copies.length} Einträge gelöscht.`, false, () => commitAll(copies.map(c => [{ op: 'add', id: c.id, item: c }, `Wiederhergestellt: ${label(c)}`, gesamt(c)])));
+    }
   }
 
   function renderGrouped() {
@@ -542,6 +589,8 @@
 
   function renderSyncInfo() {
     const el = $('#syncInfo'); if (!el) return;
+    $('#aiState').textContent = team.anthropicKey ? '✔ KI-Erkennung ist aktiv.' : 'KI-Erkennung ist nicht eingerichtet – es wird die lokale Texterkennung verwendet.';
+    $('#btnAiRemove').hidden = !team.anthropicKey;
     const [, long] = CLOUD_TEXT[sync.state] || ['', ''];
     el.innerHTML = `
       <dt>Status</dt><dd><span class="dot ${sync.state}"></span>${esc(sync.msg || long)}</dd>
@@ -550,6 +599,7 @@
       <dt>Ausstehend</dt><dd>${pending.length} Änderung(en)</dd>
       <dt>Repository</dt><dd><code>${esc(CFG.owner)}/${esc(CFG.repo)}</code> · <code>${esc(CFG.dataPath)}</code></dd>
       <dt>Team-Token</dt><dd>${team.token ? 'hinterlegt (verschlüsselt)' : '<span class="warn">nicht hinterlegt</span>'}</dd>
+      <dt>KI-Erkennung</dt><dd>${team.anthropicKey ? 'aktiv (Claude)' : 'aus – lokale Texterkennung'}</dd>
       <dt>Verschlüsselung</dt><dd>AES-256-GCM · PBKDF2-SHA256 (${fmt(CFG.iterations, 0)} Iterationen)</dd>`;
   }
 
@@ -747,6 +797,30 @@
     });
     $('#tbody').addEventListener('dblclick', e => { const tr = e.target.closest('tr'); if (tr && !e.target.closest('button')) openDialog(db.filamente.find(x => x.id === tr.dataset.id)); });
     $('#btnAdd').addEventListener('click', () => openDialog(null));
+    $('#tbody').addEventListener('change', e => {
+      const cb = e.target.closest('.rowsel'); if (!cb) return;
+      const id = cb.closest('tr').dataset.id;
+      cb.checked ? selected.add(id) : selected.delete(id);
+      cb.closest('tr').classList.toggle('selected', cb.checked);
+      renderTable();
+    });
+    $('#selAll').addEventListener('change', e => { filtered().forEach(f => e.target.checked ? selected.add(f.id) : selected.delete(f.id)); renderTable(); });
+    $('#bulkbar').addEventListener('click', e => { const b = e.target.closest('[data-bulk]'); if (b) bulkAction(b.dataset.bulk); });
+    Scan.bind();
+    $('#aiForm').addEventListener('submit', async e => {
+      e.preventDefault();
+      const k = e.target.elements.key.value.trim(), btn = e.submitter;
+      if (!/^sk-ant-/.test(k)) return toast('Das sieht nicht wie ein Claude-API-Key aus (beginnt mit sk-ant-).', true);
+      btn.disabled = true;
+      try { await saveTeam({ anthropicKey: k }); e.target.reset(); toast('KI-Erkennung aktiviert (Key verschlüsselt hinterlegt).'); }
+      catch (err) { toast(err.message, true); }
+      finally { btn.disabled = false; renderSyncInfo(); }
+    });
+    $('#btnAiRemove').addEventListener('click', async () => {
+      if (!confirm('KI-Erkennung deaktivieren und Key aus dem Repo entfernen?')) return;
+      try { await saveTeam({ anthropicKey: null }); toast('KI-Key entfernt.'); } catch (err) { toast(err.message, true); }
+      renderSyncInfo();
+    });
     $('#fab').addEventListener('click', () => openDialog(null));
     $('#itemForm').addEventListener('submit', e => { if (e.submitter?.value === 'ok' && !saveDialog()) e.preventDefault(); });
     $('#dlg').addEventListener('click', e => { if (e.target === $('#dlg')) $('#dlg').close(); });
@@ -801,12 +875,149 @@
     window.addEventListener('offline', () => key && setCloud('offline'));
     document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible' && key) runSync(); });
     document.addEventListener('keydown', e => {
-      if (!key || e.target.matches('input, select, textarea') || $('#dlg').open || e.ctrlKey || e.metaKey || e.altKey) return;
+      if (!key || e.target.matches('input, select, textarea') || $('#dlg').open || $('#scanDlg').open || e.ctrlKey || e.metaKey || e.altKey) return;
       if (e.key === 'n' || e.key === 'N') { e.preventDefault(); openDialog(null); }
+      if (e.key === 'f' || e.key === 'F') { e.preventDefault(); Scan.open(); }
+      if (e.key === 'Escape' && selected.size) { selected.clear(); renderTable(); }
       if (e.key === '/') { e.preventDefault(); switchView('bestand'); $('#q').focus(); }
     });
     setInterval(() => { if (sync.state === 'synced') setCloud('synced'); }, 60000);
   }
+
+  // ---------- Foto-Erfassung (Lieferschein / Etikett) ----------
+  const Scan = {
+    rows: [], raw: [], busy: false,
+    mode: () => $('input[name=scanMode]:checked').value,
+    engine: () => (team.anthropicKey && $('input[name=engine]:checked').value === 'ai' ? 'ai' : 'local'),
+    open() {
+      if (!key) return;
+      $('#engineSeg').hidden = !team.anthropicKey;
+      if (team.anthropicKey) $('input[name=engine][value=ai]').checked = true;
+      this.step(1);
+      $('#scanDlg').showModal();
+    },
+    step(n) {
+      $('#scanStep1').hidden = n !== 1; $('#scanStep2').hidden = n !== 2;
+      $('#scanProgress').hidden = true; $('#scanRawText').hidden = true;
+      if (n === 1) { this.rows = []; this.raw = []; $('#scanThumbs').innerHTML = ''; }
+    },
+    progress(text, p) {
+      const el = $('#scanProgress'); el.hidden = false;
+      el.querySelector('.bar-in').style.width = Math.round((p || 0) * 100) + '%';
+      el.querySelector('span').textContent = text;
+    },
+    async handle(files) {
+      if (!files.length || this.busy) return;
+      this.busy = true;
+      const mode = this.mode(), engine = this.engine();
+      const found = [];
+      try {
+        for (let i = 0; i < files.length; i++) {
+          const f = files[i], pre = files.length > 1 ? `Bild ${i + 1}/${files.length}: ` : '';
+          $('#scanThumbs').insertAdjacentHTML('beforeend', `<img src="${URL.createObjectURL(f)}" alt="Foto ${i + 1}">`);
+          if (engine === 'ai') {
+            this.progress(pre + 'KI wertet das Foto aus …', 0.5);
+            found.push(...await FBRecognize.claude(f, team.anthropicKey, mode));
+            this.raw.push(`[Bild ${i + 1}] per KI ausgewertet`);
+          } else {
+            const text = await FBRecognize.ocr(f, (t, p) => this.progress(pre + t + ' …', p));
+            this.raw.push(`[Bild ${i + 1}]\n${text}`);
+            found.push(...FBRecognize.parseText(text, mode));
+          }
+        }
+      } catch (e) {
+        toast(e.message, true);
+        if (engine === 'ai' && !found.length) { this.busy = false; this.progress('Fehler: ' + e.message, 0); return; }
+      } finally { this.busy = false; }
+      // gleiche Positionen zusammenfassen
+      const merged = [];
+      for (const c of found) {
+        const k = [c.typ, c.farbe, c.hersteller, c.kgProRolle].join('|').toLowerCase();
+        const m = merged.find(x => x.k === k);
+        if (m) m.rollen += c.rollen; else merged.push({ ...c, k });
+      }
+      this.rows = merged.map(c => this.complete(c));
+      if (!this.rows.length) this.rows.push(this.complete({ rollen: 1 }));
+      $('#scanInfo').textContent = found.length
+        ? `${this.rows.length} Position(en) erkannt (${engine === 'ai' ? 'KI' : 'lokale Texterkennung'}). Bitte prüfen und bei Bedarf korrigieren.`
+        : 'Keine Filament-Position sicher erkannt – bitte manuell ergänzen oder ein schärferes Foto verwenden.';
+      this.step(2); this.renderList();
+    },
+    /** Ergänzt fehlende Angaben und ordnet einem vorhandenen Eintrag zu. */
+    complete(c) {
+      const typ = this.matchName(c.typ || '', comboOptions('typ')) || c.typ || '';
+      const r = {
+        use: true, typ, farbe: this.matchName(c.farbe || '', comboOptions('farbe')) || c.farbe || '',
+        hersteller: this.matchName(c.hersteller || '', comboOptions('hersteller')) || c.hersteller || '',
+        rollen: Math.max(1, Math.round(c.rollen || 1)), kgProRolle: c.kgProRolle || 1,
+        durchmesser: c.durchmesser || 1.75, quelle: c.quelle || ''
+      };
+      return r;
+    },
+    matchName: (v, list) => list.find(x => x.toLowerCase() === String(v).toLowerCase()),
+    existing(r) {
+      const lc = s => String(s || '').toLowerCase();
+      return db.filamente.find(f => lc(f.typ) === lc(r.typ) && lc(f.farbe) === lc(r.farbe) && lc(f.hersteller) === lc(r.hersteller) && Math.abs(f.kgProRolle - r.kgProRolle) < 0.01);
+    },
+    renderList() {
+      $('#dlTyp').innerHTML = comboOptions('typ').map(x => `<option value="${esc(x)}">`).join('');
+      $('#dlFarbe').innerHTML = comboOptions('farbe').map(x => `<option value="${esc(x)}">`).join('');
+      $('#dlHersteller').innerHTML = comboOptions('hersteller').map(x => `<option value="${esc(x)}">`).join('');
+      $('#scanList').innerHTML = this.rows.map((r, i) => {
+        const ex = this.existing(r);
+        return `<div class="scan-row${r.use ? '' : ' off'}" data-i="${i}">
+          <label class="use"><input type="checkbox" data-f="use"${r.use ? ' checked' : ''} aria-label="Übernehmen"></label>
+          <div class="scan-fields">
+            <label>Typ<input data-f="typ" list="dlTyp" value="${esc(r.typ)}" autocomplete="off"></label>
+            <label>Farbe<input data-f="farbe" list="dlFarbe" value="${esc(r.farbe)}" autocomplete="off"></label>
+            <label>Hersteller<input data-f="hersteller" list="dlHersteller" value="${esc(r.hersteller)}" autocomplete="off"></label>
+            <label class="n">Rollen<input data-f="rollen" type="number" min="1" step="1" inputmode="numeric" value="${r.rollen}"></label>
+            <label class="n">kg/Rolle<input data-f="kgProRolle" type="number" min="0.05" step="0.05" inputmode="decimal" value="${r.kgProRolle}"></label>
+          </div>
+          <div class="scan-meta">${swatch({ farbe: r.farbe })}<span class="${ex ? 'match' : 'new'}">${ex ? `→ zu vorhandenem Eintrag (${ex.rollen} Rollen) addieren` : '→ neuer Eintrag'}</span>
+            ${r.quelle ? `<small title="${esc(r.quelle)}">„${esc(r.quelle.slice(0, 70))}${r.quelle.length > 70 ? '…' : ''}“</small>` : ''}
+            <button class="iconbtn del" data-del="${i}" aria-label="Zeile entfernen">🗑</button></div>
+        </div>`;
+      }).join('');
+      const n = this.rows.filter(r => r.use && r.typ).length;
+      $('#scanApply').textContent = `${n} Position(en) übernehmen`;
+      $('#scanApply').disabled = n === 0;
+      $('#scanRawText').textContent = this.raw.join('\n\n');
+    },
+    apply() {
+      const ops = [], used = this.rows.filter(r => r.use && r.typ);
+      const src = this.mode() === 'etikett' ? 'Etikett' : 'Lieferschein';
+      for (const r of used) {
+        const ex = this.existing(r);
+        if (ex) { ops.push([{ op: 'delta', id: ex.id, d: r.rollen }, `Foto-Import (${src}): +${r.rollen} Rolle(n) ${label(ex)}`, r.rollen * ex.kgProRolle]); continue; }
+        const gruppe = db.typen[r.typ] || STANDARD_TYPEN[r.typ] || r.typ.replace(/\s+(Matte|Silk|Metal|StoneFill|Composite|\d{2}A|VarioShore)$/i, '');
+        if (!db.typen[r.typ]) ops.push([{ op: 'typ', typ: r.typ, gruppe }]);
+        const item = { id: uid(), typ: r.typ, gruppe, farbe: r.farbe, farbcode: '', hersteller: r.hersteller, rollen: r.rollen, kgProRolle: r.kgProRolle, durchmesser: r.durchmesser, mindestbestand: 0, lagerort: '', bemerkung: '' };
+        ops.push([{ op: 'add', id: item.id, item }, `Foto-Import (${src}): Neu ${label(item)} – ${r.rollen} Rolle(n)`, r.rollen * r.kgProRolle]);
+      }
+      commitAll(ops);
+      $('#scanDlg').close();
+      toast(`${used.length} Position(en) übernommen.`);
+    },
+    bind() {
+      $('#btnScan').addEventListener('click', () => this.open());
+      $('#fabScan').addEventListener('click', () => this.open());
+      $('#scanClose').addEventListener('click', () => $('#scanDlg').close());
+      $('#scanBack').addEventListener('click', () => this.step(1));
+      for (const id of ['#scanCam', '#scanFiles']) $(id).addEventListener('change', e => { const fs = [...e.target.files]; e.target.value = ''; this.handle(fs); });
+      $('#scanList').addEventListener('input', e => {
+        const inp = e.target.closest('[data-f]'); if (!inp) return;
+        const r = this.rows[+inp.closest('.scan-row').dataset.i], f = inp.dataset.f;
+        r[f] = f === 'use' ? inp.checked : (f === 'rollen' || f === 'kgProRolle') ? num(inp.value) : inp.value.trim();
+        if (f === 'use' || e.type === 'change') this.renderList();
+      });
+      $('#scanList').addEventListener('change', e => { if (e.target.closest('[data-f]')) this.renderList(); });
+      $('#scanList').addEventListener('click', e => { const b = e.target.closest('[data-del]'); if (b) { this.rows.splice(+b.dataset.del, 1); this.renderList(); } });
+      $('#scanAddRow').addEventListener('click', () => { this.rows.push(this.complete({ rollen: 1 })); this.renderList(); });
+      $('#scanRaw').addEventListener('click', () => { $('#scanRawText').hidden = !$('#scanRawText').hidden; });
+      $('#scanApply').addEventListener('click', () => this.apply());
+    }
+  };
 
   // Für Tests/Diagnose
   window.__fb = { get state() { return { pending: pending.length, sync: sync.state, items: db.filamente.length, baseSha }; }, runSync };

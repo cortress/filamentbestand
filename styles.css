@@ -290,6 +290,54 @@ dialog h2 { font-size: 18px; }
 .toast.err { border-color: rgba(255, 93, 93, .5); }
 .toast button { margin-left: 10px; background: none; border: 0; color: var(--accent); font: inherit; font-weight: 650; cursor: pointer; }
 
+/* ---------- Auswahl & Bulk-Aktionen ---------- */
+.grid th.sel, .grid td.sel { width: 36px; padding-right: 0; cursor: default; }
+.grid input[type=checkbox], #selAll { width: 18px; height: 18px; min-height: 0; accent-color: var(--accent); cursor: pointer; vertical-align: middle; }
+.grid tbody tr.selected { background: rgba(255, 138, 61, .07); }
+.bulkbar {
+  position: sticky; bottom: 16px; z-index: 12; margin-top: 12px;
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  background: var(--panel-2); border: 1px solid rgba(255, 138, 61, .45); border-radius: 12px;
+  padding: 8px 10px 8px 16px; box-shadow: var(--shadow);
+}
+.bulk-count { margin-right: auto; color: var(--muted); }
+.bulk-count b { color: var(--accent); font-size: 16px; }
+
+/* ---------- Foto-Erfassung ---------- */
+dialog.wide { width: min(860px, calc(100vw - 32px)); }
+.scan { display: grid; gap: 14px; }
+.seg { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 6px; }
+.seg label { cursor: pointer; }
+.seg input { position: absolute; opacity: 0; pointer-events: none; }
+.seg span {
+  display: flex; flex-direction: column; gap: 2px; padding: 12px 14px; border-radius: 10px;
+  border: 1px solid var(--line); background: var(--bg-2); font-weight: 600;
+}
+.seg span small { color: var(--muted); font-weight: 500; font-size: 12px; }
+.seg input:checked + span { border-color: var(--accent); background: rgba(255, 138, 61, .1); color: var(--accent); }
+.seg input:focus-visible + span { outline: 2px solid var(--accent); outline-offset: 2px; }
+.seg.small span { padding: 8px 12px; font-size: 13px; }
+.scan-pick { margin: 6px 0 0; }
+.btn.big { flex: 1; min-height: 56px; font-size: 16px; }
+.progress { position: relative; height: 30px; background: var(--bg-2); border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+.progress .bar-in { position: absolute; inset: 0 auto 0 0; width: 0; background: linear-gradient(90deg, #e0752c, var(--accent)); opacity: .35; transition: width .2s; }
+.progress span { position: relative; display: block; padding: 5px 12px; font-size: 13px; }
+.thumbs { display: flex; gap: 8px; overflow-x: auto; }
+.thumbs img { height: 84px; border-radius: 8px; border: 1px solid var(--line); object-fit: cover; }
+.scan-list { display: grid; gap: 10px; }
+.scan-row { display: grid; grid-template-columns: 28px 1fr; gap: 6px 10px; background: var(--bg-2); border: 1px solid var(--line); border-radius: 10px; padding: 10px; }
+.scan-row.off { opacity: .45; }
+.scan-row .use { grid-row: 1 / span 2; padding-top: 22px; }
+.scan-row .use input { width: 20px; height: 20px; accent-color: var(--accent); }
+.scan-fields { display: grid; grid-template-columns: 1.3fr 1fr 1.2fr 80px 90px; gap: 8px; }
+.scan-fields label { display: flex; flex-direction: column; gap: 3px; font-size: 11.5px; color: var(--muted); min-width: 0; }
+.scan-meta { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 12.5px; }
+.scan-meta .match { color: var(--ok); } .scan-meta .new { color: var(--accent-2); }
+.scan-meta small { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; flex: 1; min-width: 0; }
+.scan-meta .iconbtn { margin-left: auto; }
+.rawtext { background: var(--bg-2); border: 1px solid var(--line); border-radius: 8px; padding: 10px; max-height: 220px; overflow: auto; font-size: 12px; white-space: pre-wrap; margin: 0; color: var(--muted); }
+.sticky-actions { position: sticky; bottom: -22px; background: var(--panel); padding: 10px 0; margin: 0; }
+
 /* ---------- Mittlere Breiten (Windows-Laptops mit 125–150 % Skalierung, Tablets) ---------- */
 @media (max-width: 1200px) {
   .topbar { gap: 16px; }
@@ -353,22 +401,25 @@ dialog h2 { font-size: 18px; }
   .grid thead { display: none; }
   .grid, .grid tbody, .grid tfoot { display: block; width: 100%; }
   .grid tbody tr {
-    display: grid; grid-template-columns: auto 1fr auto; gap: 2px 10px; align-items: center;
-    background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 12px 10px 8px 14px; margin-bottom: 10px;
+    display: grid; grid-template-columns: 26px auto 1fr auto; gap: 2px 10px; align-items: center;
+    background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 12px 10px 8px 12px; margin-bottom: 10px;
   }
+  .grid tbody tr.selected { background: #232434; border-color: rgba(255, 138, 61, .55); }
+  .grid td.sel { grid-column: 1; grid-row: 1; width: auto; padding: 0; align-self: start; padding-top: 2px; }
+  .grid td.sel input { width: 22px; height: 22px; }
   .grid td { display: block; border: 0; padding: 0; white-space: normal; }
-  .grid td.first { grid-column: 1 / 3; grid-row: 1; font-weight: 650; font-size: 16px; display: flex; flex-wrap: wrap; align-items: center; }
+  .grid td.first { grid-column: 2 / 4; grid-row: 1; font-weight: 650; font-size: 16px; display: flex; flex-wrap: wrap; align-items: center; }
   .grid td.first .m-typ { display: block; width: 100%; color: var(--muted); font-weight: 500; font-size: 13.5px; margin: 1px 0 0 24px; }
-  .grid td.col-rollen { grid-column: 3; grid-row: 1 / span 2; }
+  .grid td.col-rollen { grid-column: 4; grid-row: 1 / span 2; }
   .grid td.col-typ, .grid td.col-lager, .grid td.col-bem, .grid td[data-l="Sorte"] { display: none; }
-  .grid td[data-l="Hersteller"] { grid-column: 1 / 3; grid-row: 2; font-size: 13.5px; color: var(--muted); }
-  .grid td[data-l="kg/Rolle"] { grid-column: 1; grid-row: 3; font-size: 13.5px; color: var(--muted); }
+  .grid td[data-l="Hersteller"] { grid-column: 2 / 4; grid-row: 2; font-size: 13.5px; color: var(--muted); }
+  .grid td[data-l="kg/Rolle"] { grid-column: 2; grid-row: 3; font-size: 13.5px; color: var(--muted); }
   .grid td[data-l="kg/Rolle"]::before { content: "je Rolle "; }
   .grid td[data-l="kg/Rolle"]::after { content: " kg"; }
-  .grid td[data-l="Gesamt"] { grid-column: 2; grid-row: 3; font-size: 14px; color: var(--text); }
+  .grid td[data-l="Gesamt"] { grid-column: 3; grid-row: 3; font-size: 14px; color: var(--text); }
   .grid td[data-l="Gesamt"]::before { content: "= "; color: var(--muted); }
   .grid td.num { text-align: left; }
-  .grid td.actions { grid-column: 3; grid-row: 3; display: flex; justify-content: flex-end; gap: 0; }
+  .grid td.actions { grid-column: 4; grid-row: 3; display: flex; justify-content: flex-end; gap: 0; }
   .grid tbody tr.low { box-shadow: inset 3px 0 0 var(--warn); }
   .grid tbody tr.low td:first-child { box-shadow: none; }
   .stepper { gap: 6px; }
@@ -389,8 +440,33 @@ dialog h2 { font-size: 18px; }
   .kv dd { margin-bottom: 8px; }
   .maplist .m { grid-template-columns: 1fr 120px; }
 
+  #btnScan { display: none; }
+  .fab-2 {
+    bottom: calc(var(--nav-h) + var(--sab) + 84px); width: 48px; height: 48px; right: calc(22px + var(--sar));
+    font-size: 21px; background: var(--panel-2); border: 1px solid var(--line); box-shadow: var(--shadow);
+  }
+  body.has-sel .fab { display: none; }
+  .bulkbar {
+    position: fixed; left: 8px; right: 8px; bottom: calc(var(--nav-h) + var(--sab) + 8px); margin: 0;
+    padding: 8px; gap: 6px; flex-wrap: nowrap;
+  }
+  .bulkbar .btn { flex: 1; padding: 8px 6px; min-height: 44px; font-size: 14px; }
+  .bulkbar .btn.ghost { flex: 0 0 44px; }
+  .bulk-count { margin-right: 0; font-size: 12px; white-space: nowrap; text-align: center; line-height: 1.1; }
+  .bulkbar .lg { display: none; }
+  body.has-sel .toast { bottom: calc(var(--nav-h) + var(--sab) + 80px); }
+  .scan-fields { grid-template-columns: repeat(6, 1fr); gap: 6px; }
+  .scan-fields label { grid-column: span 3; }
+  .scan-fields label:nth-child(n+3) { grid-column: span 2; }
+  .scan-fields input { min-height: 40px; padding: 6px 8px; }
+  .scan-row { grid-template-columns: 24px 1fr; padding: 8px; gap: 4px 8px; }
+  .scan-meta small { display: none; }
+  .scan-row .use { padding-top: 20px; }
+  .seg span { padding: 10px 12px; }
+  .sticky-actions { bottom: calc(-16px - var(--sab)); padding-bottom: calc(10px + var(--sab)); }
+
   /* Dialog als Vollbild-Sheet */
-  dialog {
+  dialog, dialog.wide {
     width: 100vw; max-width: 100vw; height: 100dvh; max-height: 100dvh; margin: 0; border-radius: 0; border: 0;
     padding: calc(14px + var(--sat)) calc(16px + var(--sar)) calc(16px + var(--sab)) calc(16px + var(--sal));
   }

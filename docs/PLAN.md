@@ -23,6 +23,8 @@ Grundlage war die Excel-Liste `Filamentbestand.xlsx` (31 Positionen, 64 Rollen, 
 | A10 | Cloud-Symbol für Sync-Status | Cloud-Button oben rechts mit Zuständen *Aktuell*, *Sync …*, *Ausstehend (n)*, *Offline*, *Nur lokal*, *Fehler*, *gesperrt* |
 | A11 | Gespeicherte Stände verschlüsselt | AES-256-GCM, Schlüssel aus Team-Passwort (PBKDF2-SHA256, 600 000 Iterationen); im Repo und im Browser kein Klartext |
 | A12 | Optimiert für Windows-PC, Android, iPhone | Responsive Layout, PWA-Manifest, Safe-Areas, Touch-Ziele, iOS-Zoom-Schutz, Windows-Scrollbars/Fonts |
+| A13 | Auswahl per Kästchen, Bulk-Löschen | Checkbox je Zeile/Karte + „alle sichtbaren“, Aktionsleiste: Löschen (mit Rückgängig), −1/+1 Rolle |
+| A14 | Hinzufügen per Foto (Lieferschein / Etikett) mit Texterkennung | Kamera oder Bildauswahl → lokale OCR (Tesseract.js) bzw. optional KI (Claude) → Prüfliste → Übernahme (vorhandene Einträge werden aufgestockt) |
 
 ## 3. Architektur
 
@@ -46,7 +48,8 @@ Browser (Windows / Android / iPhone)
 |---|---|
 | `index.html` | Oberfläche (Sperrbildschirm, Ansichten, Dialog) |
 | `styles.css` | Dark-Mode-Design, Responsive-/Geräte-Optimierungen |
-| `app.js` | Logik: Krypto, Sync-Engine, Rendering, Import/Export |
+| `app.js` | Logik: Krypto, Sync-Engine, Rendering, Auswahl/Bulk, Foto-Import, Import/Export |
+| `recognize.js` | Foto-Erkennung: Tesseract-OCR, Text-Parser (Typ, Farbe, Hersteller, Menge, Gewicht), optionale Claude-Vision |
 | `data/filamente.enc.json` | Verschlüsselter Bestand inkl. Verlauf |
 | `data/team.enc.json` | Verschlüsselter Team-Zugang (GitHub-Token) + Salt |
 | `tools/crypt.mjs` | Node-Werkzeug: Initialisieren, Entschlüsseln (Backup), Verschlüsseln |
@@ -131,7 +134,31 @@ Cloud-Symbol-Zustände:
 
 Klick auf die Wolke startet sofort einen Abgleich.
 
-## 7. Geräte-Optimierung
+## 7. Auswahl & Foto-Erfassung
+
+**Auswahl / Bulk:** Kästchen vor jeder Zeile (Handy: auf jeder Karte), Kopf-Kästchen wählt alle *gefilterten* Einträge.
+Sobald etwas ausgewählt ist, erscheint die Aktionsleiste: **−1 Rolle**, **+1 Rolle**, **Löschen** (Sicherheitsabfrage + „Rückgängig“), **✕** hebt die
+Auswahl auf (auch `Esc`). Bulk-Aktionen werden als mehrere Operationen in einem Schritt gespeichert und synchronisiert.
+
+**Foto-Erfassung** (Button „📷 Aus Foto“, Handy: Kamera-Button über dem „+“, Taste `F`):
+
+1. Art wählen: *Lieferschein* (mehrere Positionen, Menge je Zeile) oder *Etikett* (eine Rolle je Foto, mehrere Fotos möglich).
+2. Foto aufnehmen (öffnet direkt die Rückkamera) oder Bilder wählen.
+3. Erkennung:
+   - **Lokal (Standard):** Tesseract.js (Deutsch + Englisch) läuft im Browser; Bild wird verkleinert und kontrastverstärkt.
+     Die Erkennungsdateien (~10 MB) werden beim ersten Mal von jsDelivr geladen und danach vom Browser zwischengespeichert. Fotos verlassen das Gerät nicht.
+   - **KI (optional):** Ist unter *Daten & Sync* ein Claude-API-Key hinterlegt (verschlüsselt in `team.enc.json`), wird das Foto an die
+     Claude-API (`claude-opus-5-5`, strukturierte JSON-Ausgabe) gesendet. Deutlich robuster bei schiefen Fotos, Tabellen und Handschrift.
+4. **Prüfliste:** Jede erkannte Position ist editierbar (Typ/Farbe/Hersteller mit Vorschlagslisten, Rollen, kg/Rolle) und zeigt an, ob sie
+   **zu einem vorhandenen Eintrag addiert** (gleicher Typ, Farbe, Hersteller, kg/Rolle) oder **neu angelegt** wird. Zeilen abwählen/löschen/ergänzen,
+   erkannten Rohtext einblenden.
+5. *Übernehmen* bucht alles in einem Schritt; im Verlauf steht „Foto-Import (Lieferschein/Etikett)“ mit Namen.
+
+Parser-Heuristik (`recognize.js`): erkennt ~45 Hersteller, Materialtypen inkl. Varianten (PLA+/Matte/Silk/Metal, PETG-CF, PLA-CF, TPU 95A, …),
+Farben auf Deutsch/Englisch/Französisch, Gewicht (g/kg), Durchmesser, Mengen („3 Stk“, „2x“, „Menge: 2“, Menge vor Preisspalten); Positionsnummern
+werden nicht als Menge gewertet.
+
+## 8. Geräte-Optimierung
 
 **Windows-PC**
 - Schrift *Segoe UI Variable*, dunkle Scrollbars (Chromium/Edge & Firefox), sichtbarer Tastaturfokus.
@@ -149,7 +176,7 @@ Klick auf die Wolke startet sofort einen Abgleich.
 
 Getestet (Playwright/Chromium): Desktop 1366×768 und 1400×1000, iPhone 13, Pixel 7 – ohne horizontales Scrollen.
 
-## 8. Inbetriebnahme
+## 9. Inbetriebnahme
 
 1. **Pages aktivieren:** Repo → *Settings → Pages → Build and deployment → Source: GitHub Actions*.
    Hinweis: Das Repo ist privat – Pages für private Repos erfordert GitHub Pro/Team/Enterprise.
@@ -162,7 +189,7 @@ Getestet (Playwright/Chromium): Desktop 1366×768 und 1400×1000, iPhone 13, Pix
 5. **Team-Passwort ändern** (Daten & Sync) und an das Team weitergeben.
 6. Auf Handys/PC „Zum Startbildschirm hinzufügen“ bzw. „App installieren“.
 
-## 9. Betrieb
+## 10. Betrieb
 
 - **Backup/Klartext-Export:** in der App *Export JSON/CSV* oder
   `node tools/crypt.mjs decrypt data/filamente.enc.json > backup.json` (fragt nach dem Passwort).
@@ -170,7 +197,7 @@ Getestet (Playwright/Chromium): Desktop 1366×768 und 1400×1000, iPhone 13, Pix
 - **Gerät verloren:** Team-Passwort ändern (macht gespeicherte Schlüssel ungültig) und ggf. Token neu erstellen.
 - **Rate-Limit:** 5 000 Anfragen/h pro Token; Abgleich alle 20 s mit ETag (304 zählt nicht) reicht für ein Team problemlos.
 
-## 10. Tests
+## 11. Tests
 
 | Test | Ergebnis |
 |---|---|
@@ -183,13 +210,20 @@ Getestet (Playwright/Chromium): Desktop 1366×768 und 1400×1000, iPhone 13, Pix
 | Offline-Änderung → nach Reconnect übertragen | ✔ |
 | „Angemeldet bleiben“ nach Reload | ✔ |
 | Layout iPhone 13 / Pixel 7 / 1366×768 ohne Überlauf | ✔ |
+| Auswahl (einzeln / alle gefilterten), Bulk-Löschen + Rückgängig | ✔ Desktop & iPhone |
+| Foto Lieferschein (3 Positionen, Mengen 3/2/1, Positionsnummern ignoriert) per lokaler OCR | ✔ |
+| Foto Etikett (eSun PLA+ Weiß 1 kg) per lokaler OCR | ✔ |
+| Zuordnung zu vorhandenem Eintrag vs. neuer Eintrag | ✔ |
+
+Die KI-Erkennung wurde nicht live getestet (kein API-Key in der Testumgebung).
 
 Die Tests liefen gegen eine simulierte GitHub-API; der erste echte Abgleich erfolgt nach Hinterlegen des Tokens.
 
-## 11. Mögliche Erweiterungen
+## 12. Mögliche Erweiterungen
 
 - Service Worker für vollständige Offline-Nutzung der App-Dateien.
 - Restgewicht angebrochener Rollen (Waage/Prozent).
 - Bestellliste aus Mindestbeständen, Benachrichtigung bei Unterschreitung.
 - QR-Etiketten pro Rolle zum schnellen Ausbuchen per Handy-Kamera.
+- Barcode-/EAN-Erkennung auf Etiketten (Zuordnung über Artikelnummer).
 - Mehrere Lager/Standorte, Preise & Lieferanten-Links.

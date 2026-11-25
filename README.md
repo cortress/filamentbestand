@@ -15,6 +15,8 @@ Daten **verschlüsselt** im Repository, **automatischer Sync** zwischen allen Ge
 - Automatisches Speichern + Zusammenführen gleichzeitiger Änderungen, Offline-fähig
 - ☁ Cloud-Symbol oben rechts: grün = alles aktuell, gelb = ausstehend, orange = synchronisiert gerade, rot = Fehler
 - AES-256-GCM-Verschlüsselung (Team-Passwort), nichts im Klartext im Repo oder im Browser-Speicher
+- Mehrfachauswahl per Kästchen: Löschen (mit Rückgängig), ±1 Rolle für alle ausgewählten
+- 📷 Hinzufügen per Foto von Lieferschein oder Rollen-Etikett – lokale Texterkennung oder optional KI (Claude), mit Prüfliste vor dem Übernehmen
 - Installierbar als App (Startbildschirm), CSV/JSON-Export & -Import
 
 ## Einrichtung (einmalig)

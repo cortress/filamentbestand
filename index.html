@@ -84,6 +84,7 @@
         </select>
         <label class="toggle"><input type="checkbox" id="fKnapp"> <span>Nur knapp</span></label>
         <button class="btn ghost" id="btnReset" title="Filter zurücksetzen">Filter löschen</button>
+        <button class="btn" id="btnScan" title="Lieferschein oder Etikett fotografieren">📷 Aus Foto</button>
         <button class="btn primary" id="btnAdd" title="Neues Filament (Taste N)">+ Filament</button>
       </div>
       <div class="chips" id="gruppenChips"></div>
@@ -92,6 +93,7 @@
         <table class="grid" id="tbl">
           <thead>
             <tr>
+              <th class="sel"><input type="checkbox" id="selAll" aria-label="Alle sichtbaren auswählen"></th>
               <th data-sort="farbe">Farbe</th>
               <th data-sort="typ">Typ</th>
               <th data-sort="gruppe">Sorte</th>
@@ -110,6 +112,14 @@
         <p class="empty" id="empty" hidden>Keine Filamente gefunden.</p>
       </div>
       <button class="fab" id="fab" aria-label="Filament hinzufügen">+</button>
+      <button class="fab fab-2" id="fabScan" aria-label="Aus Foto hinzufügen">📷</button>
+      <div class="bulkbar" id="bulkbar" hidden>
+        <span class="bulk-count"><b id="bulkCount">0</b> ausgewählt</span>
+        <button class="btn" data-bulk="dec" title="Je eine Rolle verbraucht">−1<span class="lg"> Rolle</span></button>
+        <button class="btn" data-bulk="inc" title="Je eine Rolle hinzugefügt">+1<span class="lg"> Rolle</span></button>
+        <button class="btn danger" data-bulk="del">Löschen</button>
+        <button class="btn ghost" data-bulk="clear" aria-label="Auswahl aufheben">✕</button>
+      </div>
     </section>
 
     <!-- GRUPPIERT -->
@@ -167,6 +177,18 @@
         </div>
 
         <div class="card">
+          <h3>KI-Erkennung für Fotos <span class="unit">optional</span></h3>
+          <p class="hint">Ohne Einstellung werden Lieferscheine und Etiketten <strong>lokal im Browser</strong> per Texterkennung gelesen
+            (kostenlos, Fotos verlassen das Gerät nicht). Mit einem Claude-API-Key (console.anthropic.com) wird das Foto zur Auswertung an
+            Anthropic gesendet – deutlich genauer, besonders bei Lieferscheinen. Der Key wird mit dem Team-Passwort verschlüsselt im Repo abgelegt.</p>
+          <p class="hint small" id="aiState"></p>
+          <form id="aiForm" class="form one">
+            <label>Claude-API-Key <input name="key" type="password" placeholder="sk-ant-…" autocomplete="off"></label>
+            <div class="row"><button class="btn primary">Key verschlüsselt hinterlegen</button><button class="btn danger" type="button" id="btnAiRemove">Key entfernen</button></div>
+          </form>
+        </div>
+
+        <div class="card">
           <h3>Import &amp; Export</h3>
           <p class="hint">Exportdateien sind <strong>unverschlüsselt</strong> – nur für Excel/Backups verwenden. CSV ist Excel-kompatibel.</p>
           <div class="row">
@@ -209,7 +231,46 @@
     </form>
   </dialog>
 
+  <!-- FOTO-ERFASSUNG -->
+  <dialog id="scanDlg" class="wide">
+    <div class="scan">
+      <div class="dlg-head"><h2>Aus Foto hinzufügen</h2><button class="iconbtn" id="scanClose" aria-label="Schließen">✕</button></div>
+      <div id="scanStep1">
+        <div class="seg" role="radiogroup" aria-label="Art des Fotos">
+          <label><input type="radio" name="scanMode" value="lieferschein" checked><span>🧾 Lieferschein<small>mehrere Positionen</small></span></label>
+          <label><input type="radio" name="scanMode" value="etikett"><span>🏷️ Etikett<small>eine Rolle je Foto</small></span></label>
+        </div>
+        <div class="seg small" id="engineSeg" role="radiogroup" aria-label="Erkennung">
+          <label><input type="radio" name="engine" value="local" checked><span>Lokal (Texterkennung)</span></label>
+          <label><input type="radio" name="engine" value="ai"><span>KI (Claude)</span></label>
+        </div>
+        <div class="row scan-pick">
+          <label class="btn primary big">📷 Foto aufnehmen<input type="file" id="scanCam" accept="image/*" capture="environment" hidden></label>
+          <label class="btn big">🖼️ Bilder wählen<input type="file" id="scanFiles" accept="image/*" multiple hidden></label>
+        </div>
+        <p class="hint small">Tipp: Foto gerade von oben, gut ausgeleuchtet, Text formatfüllend. Bei Etiketten können mehrere Fotos auf einmal gewählt werden.</p>
+        <div class="progress" id="scanProgress" hidden><div class="bar-in"></div><span></span></div>
+      </div>
+      <div id="scanStep2" hidden>
+        <div class="thumbs" id="scanThumbs"></div>
+        <p class="hint small" id="scanInfo"></p>
+        <div class="scan-list" id="scanList"></div>
+        <div class="row">
+          <button class="btn ghost" id="scanAddRow">+ Zeile</button>
+          <button class="btn ghost" id="scanRaw">Erkannten Text zeigen</button>
+        </div>
+        <pre class="rawtext" id="scanRawText" hidden></pre>
+        <div class="row end sticky-actions">
+          <button class="btn ghost" id="scanBack">Neues Foto</button>
+          <button class="btn primary" id="scanApply">Übernehmen</button>
+        </div>
+      </div>
+    </div>
+    <datalist id="dlTyp"></datalist><datalist id="dlFarbe"></datalist><datalist id="dlHersteller"></datalist>
+  </dialog>
+
   <div class="toast" id="toast" role="status" aria-live="polite"></div>
+  <script src="recognize.js"></script>
   <script src="app.js"></script>
 </body>
 </html>
