@@ -121,6 +121,7 @@
         <span class="bulk-count"><b id="bulkCount">0</b> ausgewählt</span>
         <button class="btn" data-bulk="dec" title="Je eine Rolle verbraucht">−1<span class="lg"> Rolle</span></button>
         <button class="btn" data-bulk="inc" title="Je eine Rolle hinzugefügt">+1<span class="lg"> Rolle</span></button>
+        <button class="btn" data-bulk="shop" title="Auf die Einkaufsliste setzen">📝<span class="lg"> Einkaufsliste</span></button>
         <button class="btn" data-bulk="order" title="Ausgewählte nachbestellen">🛒<span class="lg"> Bestellen</span></button>
         <button class="btn danger" data-bulk="del">Löschen</button>
         <button class="btn ghost" data-bulk="clear" aria-label="Auswahl aufheben">✕</button>
@@ -145,6 +146,29 @@
     <!-- BESTELLUNGEN -->
     <section class="view" id="view-orders">
       <div class="kpis" id="kpiOrders"></div>
+      <div class="card shop" id="shopCard">
+        <div class="shop-head">
+          <h3>📝 Einkaufsliste <span class="unit" id="shopCount"></span></h3>
+          <button class="btn ghost" type="button" id="shopLow" hidden></button>
+        </div>
+        <form id="shopForm" class="shop-form" autocomplete="off">
+          <label>Art<select name="kat"><option value="zubehoer">🔧 Zubehör</option><option value="filamente">Filament</option><option value="resin">Resin</option></select></label>
+          <label class="w2"><span id="shopTypLbl">Artikel</span><input name="typ" required autocomplete="off" enterkeyhint="done"></label>
+          <label class="nz">Farbe<input name="farbe" list="odlFarbe" autocomplete="off"></label>
+          <label>Hersteller<input name="hersteller" list="odlHersteller" autocomplete="off"></label>
+          <label class="n">Menge<input name="menge" type="number" min="1" step="1" value="1" inputmode="numeric"></label>
+          <label class="n nz">Inhalt<input name="kg" type="number" min="0.05" step="0.05" inputmode="decimal" placeholder="kg/Rolle"></label>
+          <label class="w2">Notiz / Link<input name="notiz" autocomplete="off" placeholder="optional"></label>
+          <div class="shop-btns"><button class="btn ghost" type="button" id="shopCancelEdit" hidden>Abbrechen</button><button class="btn primary" id="shopSubmit">+ Hinzufügen</button></div>
+        </form>
+        <div class="shop-list" id="shopList"></div>
+        <div class="row shop-actions" id="shopActions" hidden>
+          <button class="btn ghost" type="button" id="shopSelAll">Alle auswählen</button>
+          <select id="shopToOrder" aria-label="Zu offener Bestellung hinzufügen"></select>
+          <button class="btn primary" type="button" id="shopToNew">🛒 Alle bestellen</button>
+        </div>
+      </div>
+      <h3 class="section-title">Bestellungen</h3>
       <div class="toolbar">
         <div class="seg small inline-seg" role="radiogroup" aria-label="Anzeige">
           <label><input type="radio" name="ordFilter" value="offen" checked><span>Offen</span></label>
@@ -309,7 +333,10 @@
       <div class="full">
         <h3 class="pos-title">Positionen</h3>
         <div id="orderPos" class="opos-list"></div>
-        <button class="btn" type="button" id="orderAddPos">+ Position</button>
+        <div class="row">
+          <button class="btn" type="button" id="orderAddPos">+ Position</button>
+          <details class="from-shop" id="orderFromShop" hidden><summary class="btn"><span>📝 Aus Einkaufsliste (<span id="orderShopCount">0</span>)</span></summary><div class="chips" id="orderShopList"></div></details>
+        </div>
       </div>
       <p class="hint small full" id="orderSum"></p>
       <div class="row full end sticky-actions">
@@ -318,7 +345,7 @@
         <button class="btn primary" value="ok">Speichern</button>
       </div>
     </form>
-    <datalist id="odlLieferant"></datalist><datalist id="odlTyp-filamente"></datalist><datalist id="odlTyp-resin"></datalist>
+    <datalist id="odlLieferant"></datalist><datalist id="odlTyp-filamente"></datalist><datalist id="odlTyp-resin"></datalist><datalist id="odlTyp-zubehoer"></datalist>
     <datalist id="odlFarbe"></datalist><datalist id="odlHersteller"></datalist>
   </dialog>
 

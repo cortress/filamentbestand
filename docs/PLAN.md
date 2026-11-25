@@ -211,6 +211,23 @@ Eigener Tab mit derselben Tabelle wie Filament (Suche, Filter, Sortierung, Auswa
 - **Bearbeiten/Stornieren** offener Bestellungen; erledigte Bestellungen können aus der Liste entfernt werden (Inventar bleibt unverändert).
 - Datenmodell: `bestellungen[]` – eine Zeile je Position, Positionen einer Bestellung teilen `bid`; Status-/Mengenänderungen als Operationen (Merge-fähig).
 
+### Einkaufsliste
+
+Oben auf der Seite *Bestellungen* steht die **Einkaufsliste** – alles, was noch bestellt werden muss:
+
+- Arten: **Filament**, **Resin** und **🔧 Zubehör** (Düsen, Druckplatten, IPA, PTFE-Schlauch, FEP-Folie, Werkzeug … – Vorschlagsliste,
+  frei erweiterbar). Felder: Artikel/Typ, Farbe, Hersteller, Menge, Inhalt (kg), Notiz/Link; wer es eingetragen hat, wird gespeichert.
+- Eintragen über das Formular (Enter genügt), aus dem Bestand per Mehrfachauswahl **📝 Einkaufsliste** oder mit
+  **⚠ Knappe Bestände übernehmen** (alle Einträge unter Mindestbestand, die weder auf der Liste noch bestellt sind).
+  Gleiche Artikel werden aufgestockt statt doppelt angelegt. Menge −/+, antippen = bearbeiten, 🗑 mit Rückgängig.
+- **🛒 Alle/Ausgewählte bestellen** öffnet eine neue Bestellung mit diesen Positionen; **„… zu offener Bestellung“** hängt sie an eine
+  bestehende offene Bestellung an. Im Bestelldialog fügt **📝 Aus Einkaufsliste** einzelne Einträge hinzu.
+- Erst beim **Speichern** der Bestellung verschwinden die übernommenen Einträge von der Liste (Abbrechen ändert nichts).
+- Zubehör-Positionen werden bei „✓ Erhalten“ nur abgehakt und im Verlauf vermerkt – sie werden nicht ins Lager gebucht.
+
+Datenmodell: `einkauf: [{ id, kat: "filamente|resin|zubehoer", typ, farbe, hersteller, menge, kgProRolle, durchmesser, notiz, wer, t }]`,
+Bestellpositionen haben zusätzlich `kat: "zubehoer"`. Operationen nutzen `coll: "einkauf"`.
+
 ## 11. Geräte-Optimierung
 
 **Windows-PC**
@@ -274,6 +291,9 @@ Getestet (Playwright/Chromium): Desktop 1366×768 und 1400×1000, iPhone 13, Pix
 | Mehrbenutzer-Merge und Konfliktauflösung mit erweitertem Datenmodell | ✔ |
 | Bestellung aus Bestand (🛒) mit 3 Positionen (Filament vorhanden, Resin neu, Filament neu), Überfällig-Markierung, „+4 bestellt“ im Bestand | ✔ Desktop & iPhone |
 | Erhalten einzeln (Lager 2 → 6) + Rückgängig, „Alles erhalten“ legt neue Einträge an, Mehrfach-Bestellung aus Auswahl | ✔ |
+| Einkaufsliste: aus Bestand (2), Zubehör (Düse, IPA), Filament, Aufstocken gleicher Artikel, −/+, Bearbeiten, knappe Bestände übernehmen | ✔ Desktop & iPhone |
+| Ausgewählte → neue Bestellung, Rest → offene Bestellung anhängen, Chip „Aus Einkaufsliste“; Liste wird beim Speichern geleert | ✔ |
+| Erhalt: Filament ins Lager (neu/aufgestockt), Zubehör nur abgehakt, Verlauf | ✔ |
 
 Die KI-Erkennung wurde nicht live getestet (kein API-Key in der Testumgebung).
 

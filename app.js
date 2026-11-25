@@ -149,25 +149,36 @@
     return { id: p.id || uid(), name: String(p.name || 'Drucker').trim().slice(0, 40), slots: Math.max(0, Math.min(16, Math.round(num(p.slots)))), ext: !!p.ext };
   }
   /** Bestellposition; Positionen einer Bestellung teilen sich `bid`. */
+  const KATS = ['filamente', 'resin', 'zubehoer'];
+  const katOf = k => KATS.includes(k) ? k : 'filamente';
   function normalizeOrder(o) {
-    const typ = String(o.typ || '').trim(), kat = o.kat === 'resin' ? 'resin' : 'filamente';
+    const typ = String(o.typ || '').trim(), kat = katOf(o.kat), zub = kat === 'zubehoer';
     return {
       id: o.id || uid(), bid: o.bid || o.id || uid(), kat, typ,
       farbe: String(o.farbe || '').trim(), hersteller: String(o.hersteller || '').trim(),
-      menge: Math.max(1, Math.round(num(o.menge) || 1)), kgProRolle: num(o.kgProRolle) || 1,
-      durchmesser: kat === 'resin' ? 0 : (num(o.durchmesser) || 1.75), preis: Math.max(0, num(o.preis)),
+      menge: Math.max(1, Math.round(num(o.menge) || 1)), kgProRolle: zub ? 0 : (num(o.kgProRolle) || 1),
+      durchmesser: kat === 'filamente' ? (num(o.durchmesser) || 1.75) : 0, preis: Math.max(0, num(o.preis)),
       lieferant: String(o.lieferant || '').trim(), bestellnr: String(o.bestellnr || '').trim(),
       bestellt: o.bestellt || '', erwartet: o.erwartet || '', bemerkung: String(o.bemerkung || '').trim(),
       status: ['offen', 'erhalten', 'storniert'].includes(o.status) ? o.status : 'offen',
       erhaltenAm: o.erhaltenAm || '', wer: o.wer || ''
     };
   }
-  const NORM = { filamente: normalizeItem, resin: normalizeItem, inUse: normalizeUse, bestellungen: normalizeOrder };
+  /** Einkaufsliste: was noch bestellt werden muss (Filament, Resin oder Zubehör). */
+  function normalizeShop(e) {
+    const kat = katOf(e.kat), zub = kat === 'zubehoer';
+    return {
+      id: e.id || uid(), kat, typ: String(e.typ || '').trim(), farbe: String(e.farbe || '').trim(), hersteller: String(e.hersteller || '').trim(),
+      menge: Math.max(1, Math.round(num(e.menge) || 1)), kgProRolle: zub ? 0 : (num(e.kgProRolle) || 1),
+      durchmesser: kat === 'filamente' ? (num(e.durchmesser) || 1.75) : 0, notiz: String(e.notiz || '').trim(), wer: e.wer || '', t: e.t || ''
+    };
+  }
+  const NORM = { filamente: normalizeItem, resin: normalizeItem, inUse: normalizeUse, bestellungen: normalizeOrder, einkauf: normalizeShop };
   function normalize(d) {
     d = d && typeof d === 'object' ? d : {};
     const list = Array.isArray(d) ? d : (d.filamente || []);
     // Unbekannte Felder (z. B. aus neueren App-Versionen) beim Speichern erhalten
-    const extra = Array.isArray(d) ? {} : Object.fromEntries(Object.entries(d).filter(([k]) => !['version', 'aktualisiert', 'typen', 'verlauf', 'filamente', 'resin', 'inUse', 'drucker', 'bestellungen', 'codes'].includes(k)));
+    const extra = Array.isArray(d) ? {} : Object.fromEntries(Object.entries(d).filter(([k]) => !['version', 'aktualisiert', 'typen', 'verlauf', 'filamente', 'resin', 'inUse', 'drucker', 'bestellungen', 'einkauf', 'codes'].includes(k)));
     return {
       ...extra,
       version: 3, aktualisiert: d.aktualisiert || null,
@@ -178,6 +189,7 @@
       inUse: (Array.isArray(d.inUse) ? d.inUse : []).map(normalizeUse),
       drucker: (Array.isArray(d.drucker) ? d.drucker : []).map(normalizePrinter),
       bestellungen: (Array.isArray(d.bestellungen) ? d.bestellungen : []).map(normalizeOrder),
+      einkauf: (Array.isArray(d.einkauf) ? d.einkauf : []).map(normalizeShop),
       // gelernte Barcodes/QR-Codes → Artikelangaben (Foto-Erkennung)
       codes: d.codes && typeof d.codes === 'object' && !Array.isArray(d.codes) ? d.codes : {}
     };
@@ -488,7 +500,7 @@
   const kpiHtml = items => items.map(([l, v, unit, cls]) => `<div class="kpi ${cls || ''}"><div class="label">${l}</div><div class="value">${v}${unit ? `<small>${unit}</small>` : ''}</div></div>`).join('');
 
   function render() {
-    renderFilters(); renderTable(); renderGrouped(); renderStats(); renderMap(); InUse.render(); Orders.render(); renderSyncInfo();
+    renderFilters(); renderTable(); renderGrouped(); renderStats(); renderMap(); InUse.render(); Orders.render(); Shop.render(); renderSyncInfo();
     $('#subline').textContent = db.aktualisiert
       ? `Stand: ${new Date(db.aktualisiert).toLocaleString('de-DE', { dateStyle: 'medium', timeStyle: 'short' })}`
       : 'Lager für unsere 3D-Drucker';
@@ -578,6 +590,7 @@
       toast(`${ops.length} Einträge: ${d > 0 ? '+1' : '−1'} ${U().one}.`);
     }
     if (act === 'order') { Orders.open(null, sel.map(f => Orders.fromItem(f, ui.coll))); return; }
+    if (act === 'shop') { Shop.addMany(sel.map(f => Orders.fromItem(f, ui.coll))); selected.clear(); renderTable(); return; }
     if (act === 'del') {
       if (!confirm(`${sel.length} Einträge wirklich löschen?\n\n${sel.slice(0, 8).map(label).join('\n')}${sel.length > 8 ? '\n…' : ''}`)) return;
       const copies = sel.map(clone);
@@ -918,7 +931,7 @@
     });
     $('#selAll').addEventListener('change', e => { filtered().forEach(f => e.target.checked ? selected.add(f.id) : selected.delete(f.id)); renderTable(); });
     $('#bulkbar').addEventListener('click', e => { const b = e.target.closest('[data-bulk]'); if (b) bulkAction(b.dataset.bulk); });
-    Scan.bind(); InUse.bind(); Use.bind(); Printers.bind(); Orders.bind();
+    Scan.bind(); InUse.bind(); Use.bind(); Printers.bind(); Orders.bind(); Shop.bind();
     $('#btnGotoGrouped').addEventListener('click', () => switchView('gruppiert'));
     $('#aiForm').addEventListener('submit', async e => {
       e.preventDefault();
@@ -1165,6 +1178,7 @@
   const lc = v => String(v || '').toLowerCase().trim();
   /** Passender Lagereintrag (gleicher Typ, Farbe, Hersteller, Inhalt, bei Filament Durchmesser). */
   function matchStock(kat, p) {
+    if (kat !== 'filamente' && kat !== 'resin') return null;
     return db[kat].find(f => lc(f.typ) === lc(p.typ) && lc(f.farbe) === lc(p.farbe) && lc(f.hersteller) === lc(p.hersteller)
       && Math.abs(f.kgProRolle - p.kgProRolle) < 0.01 && (kat === 'resin' || Math.abs((f.durchmesser || 1.75) - (p.durchmesser || 1.75)) < 0.01));
   }
@@ -1194,6 +1208,7 @@
       $('#kpiOrders').innerHTML = kpiHtml([
         ['Offen', openG.length], ['Rollen bestellt', openPos.filter(o => o.kat === 'filamente').reduce((n, o) => n + o.menge, 0)],
         ['Flaschen bestellt', openPos.filter(o => o.kat === 'resin').reduce((n, o) => n + o.menge, 0)],
+        ['Zubehör bestellt', openPos.filter(o => o.kat === 'zubehoer').reduce((n, o) => n + o.menge, 0)],
         ['Überfällig', overdue, '', overdue ? 'warn' : ''], ['Offener Wert', fmt(sumOpen, 2), '€']
       ]);
       const q = lc(this.q);
@@ -1211,7 +1226,7 @@
             <span class="state ${g.state}">${stateTxt}</span>
           </div>
           <div class="order-pos">${g.list.map(o => `<div class="opos-item ${o.status}">
-            ${swatch(o)}<span class="t"><b>${o.menge}×</b> ${esc(label(o))} <small>${fmt(o.kgProRolle)} kg${o.kat === 'resin' ? ' · Resin' : ''}${o.preis ? ` · ${fmt(o.preis, 2)} €` : ''}</small></span>
+            ${katIcon(o)}<span class="t"><b>${o.menge}×</b> ${esc(label(o))} <small>${o.kat === 'zubehoer' ? 'Zubehör' : fmt(o.kgProRolle) + ' kg'}${o.kat === 'resin' ? ' · Resin' : ''}${o.preis ? ` · ${fmt(o.preis, 2)} €` : ''}</small></span>
             ${o.status === 'offen' ? `<button class="btn ok" data-recv="${esc(o.id)}">✓ Erhalten</button>` : `<span class="done">${o.status === 'erhalten' ? `✓ ${dateDe(o.erhaltenAm)}` : 'storniert'}</span>`}
           </div>`).join('')}</div>
           <div class="row order-actions">
@@ -1223,7 +1238,7 @@
     fromItem(f, kat) {
       return { kat, typ: f.typ, farbe: f.farbe, hersteller: f.hersteller, menge: Math.max(1, (f.mindestbestand || 0) - f.rollen + 1), kgProRolle: f.kgProRolle, durchmesser: f.durchmesser, preis: 0 };
     },
-    open(bid, prefill) {
+    open(bid, prefill, extra = []) {
       if (!key) return;
       this.editBid = bid;
       const f = $('#orderForm'), list = bid ? db.bestellungen.filter(o => o.bid === bid && o.status === 'offen') : [];
@@ -1231,7 +1246,8 @@
       f.elements.lieferant.value = h.lieferant || ''; f.elements.bestellnr.value = h.bestellnr || '';
       f.elements.bestellt.value = h.bestellt || today(); f.elements.erwartet.value = h.erwartet || '';
       f.elements.bemerkung.value = h.bemerkung || '';
-      this.pos = list.length ? list.map(o => ({ ...o })) : (prefill && prefill.length ? prefill : [{ kat: 'filamente', typ: '', farbe: '', hersteller: '', menge: 1, kgProRolle: 1, durchmesser: 1.75, preis: 0 }]);
+      this.pos = list.length ? list.map(o => ({ ...o })) : (prefill && prefill.length ? prefill : (extra.length ? [] : [{ kat: 'filamente', typ: '', farbe: '', hersteller: '', menge: 1, kgProRolle: 1, durchmesser: 1.75, preis: 0 }]));
+      this.pos.push(...extra);
       $('#orderTitle').textContent = bid ? 'Bestellung bearbeiten' : 'Bestellung erfassen';
       $('#orderCancelBtn').hidden = !bid;
       const opts = (arr) => [...new Set(arr.filter(Boolean))].sort((a, b) => a.localeCompare(b, 'de')).map(x => `<option value="${esc(x)}">`).join('');
@@ -1239,34 +1255,41 @@
       $('#odlTyp-filamente').innerHTML = opts([...Object.keys(db.typen), ...db.filamente.map(f => f.typ)]);
       $('#odlTyp-resin').innerHTML = opts([...RESIN_TYPEN, ...db.resin.map(f => f.typ)]);
       $('#odlFarbe').innerHTML = opts([...db.filamente, ...db.resin].map(f => f.farbe).concat(['Schwarz', 'Weiß', 'Grau', 'Rot', 'Blau', 'Grün', 'Gelb', 'Orange', 'Transparent']));
-      $('#odlHersteller').innerHTML = opts([...db.filamente, ...db.resin].map(f => f.hersteller));
+      $('#odlHersteller').innerHTML = opts([...db.filamente, ...db.resin, ...db.einkauf].map(f => f.hersteller));
+      $('#odlTyp-zubehoer').innerHTML = opts([...ZUBEHOER, ...db.einkauf.filter(e => e.kat === 'zubehoer').map(e => e.typ), ...db.bestellungen.filter(o => o.kat === 'zubehoer').map(o => o.typ)]);
       this.renderPos();
       $('#orderDlg').showModal();
     },
     renderPos() {
       $('#orderPos').innerHTML = this.pos.map((p, i) => {
-        const ex = p.typ ? matchStock(p.kat, p) : null;
-        return `<div class="opos" data-i="${i}">
-          <label>Art<select data-f="kat"><option value="filamente"${p.kat !== 'resin' ? ' selected' : ''}>Filament</option><option value="resin"${p.kat === 'resin' ? ' selected' : ''}>Resin</option></select></label>
-          <label class="w2">Typ<input data-f="typ" list="odlTyp-${p.kat === 'resin' ? 'resin' : 'filamente'}" value="${esc(p.typ)}" required autocomplete="off"></label>
+        const zub = p.kat === 'zubehoer';
+        return `<div class="opos${zub ? ' zub' : ''}" data-i="${i}">
+          <label>Art<select data-f="kat">${KAT_OPTS(p.kat)}</select></label>
+          <label class="w2">${zub ? 'Artikel' : 'Typ'}<input data-f="typ" list="odlTyp-${katOf(p.kat)}" value="${esc(p.typ)}" required autocomplete="off"></label>
           <label>Farbe<input data-f="farbe" list="odlFarbe" value="${esc(p.farbe)}" autocomplete="off"></label>
           <label>Hersteller<input data-f="hersteller" list="odlHersteller" value="${esc(p.hersteller)}" autocomplete="off"></label>
           <label class="n">Menge<input data-f="menge" type="number" min="1" step="1" inputmode="numeric" value="${p.menge}"></label>
-          <label class="n">kg/${p.kat === 'resin' ? 'Fl.' : 'Rolle'}<input data-f="kgProRolle" type="number" min="0.05" step="0.05" inputmode="decimal" value="${p.kgProRolle}"></label>
+          ${zub ? '' : `<label class="n">kg/${p.kat === 'resin' ? 'Fl.' : 'Rolle'}<input data-f="kgProRolle" type="number" min="0.05" step="0.05" inputmode="decimal" value="${p.kgProRolle}"></label>`}
           <label class="n">Preis €<input data-f="preis" type="number" min="0" step="0.01" inputmode="decimal" value="${p.preis || ''}" placeholder="opt."></label>
           <button type="button" class="iconbtn del" data-del="${i}" aria-label="Position entfernen">🗑</button>
           <span class="opos-hint"></span>
         </div>`;
       }).join('');
       this.pos.forEach((_, i) => this.updateHint(i));
+      // Einkaufsliste: noch nicht übernommene Einträge zum Hinzufügen anbieten
+      const avail = db.einkauf.filter(e => !this.pos.some(p => p.fromShop === e.id));
+      $('#orderFromShop').hidden = !avail.length;
+      $('#orderShopCount').textContent = avail.length;
+      $('#orderShopList').innerHTML = avail.map(e => `<button type="button" class="chip" data-shop="${esc(e.id)}">${katIcon(e)} ${e.menge}× ${esc(label(e))}</button>`).join('');
     },
     /** Nur Hinweis + Summe aktualisieren (kein Neuaufbau → Fokus bleibt im Feld). */
     updateHint(i) {
       const p = this.pos[i], el = $(`#orderPos .opos[data-i="${i}"] .opos-hint`);
       if (el) {
         const ex = p.typ ? matchStock(p.kat, p) : null;
-        el.className = 'opos-hint ' + (ex ? 'match' : 'new');
-        el.textContent = p.typ ? (ex ? `→ wird bei Erhalt zu „${label(ex)}“ (${ex.rollen} vorhanden) addiert` : '→ wird bei Erhalt neu angelegt') : '';
+        el.className = 'opos-hint ' + (ex || p.kat === 'zubehoer' ? 'match' : 'new');
+        el.textContent = (p.fromShop ? '📝 aus Einkaufsliste · ' : '') + (!p.typ ? '' : p.kat === 'zubehoer' ? '→ wird bei Erhalt abgehakt (kein Lagerbestand)'
+          : ex ? `→ wird bei Erhalt zu „${label(ex)}“ (${ex.rollen} vorhanden) addiert` : '→ wird bei Erhalt neu angelegt');
       }
       const sum = this.pos.reduce((s, q) => s + num(q.preis), 0);
       $('#orderSum').textContent = `${this.pos.length} Position(en)${sum ? ` · Summe ${fmt(sum, 2)} €` : ''}`;
@@ -1279,11 +1302,14 @@
       const bid = this.editBid || uid(), ops = [];
       const before = this.editBid ? db.bestellungen.filter(o => o.bid === bid && o.status === 'offen') : [];
       for (const p of pos) {
-        const o = normalizeOrder({ ...p, ...head, bid, id: p.id || uid(), wer: p.wer || me, status: 'offen' });
+        const { fromShop, notiz, t, ...rest } = p;
+        const o = normalizeOrder({ ...rest, ...head, bid, id: p.id || uid(), wer: (p.id && p.wer) || me, status: 'offen' });
         if (p.id && before.some(b => b.id === p.id)) ops.push([{ op: 'patch', coll: 'bestellungen', id: o.id, fields: o }]);
         else ops.push([{ op: 'add', coll: 'bestellungen', id: o.id, item: o }]);
       }
       for (const b of before) if (!pos.some(p => p.id === b.id)) ops.push([{ op: 'del', coll: 'bestellungen', id: b.id }]);
+      // bestellte Einträge der Einkaufsliste sind damit erledigt
+      for (const p of pos) if (p.fromShop && db.einkauf.some(e => e.id === p.fromShop)) ops.push([{ op: 'del', coll: 'einkauf', id: p.fromShop }]);
       const txt = `${this.editBid ? 'Bestellung geändert' : 'Bestellt'}${head.lieferant ? ' bei ' + head.lieferant : ''}: ${pos.map(p => `${p.menge}× ${label(p)}`).join(', ')}`;
       ops[ops.length - 1][1] = txt;
       commitAll(ops);
@@ -1296,6 +1322,11 @@
       if (!list.length) return;
       const ops = [], undo = [], created = new Map(), now = new Date().toISOString().slice(0, 10);
       for (const o of list) {
+        if (o.kat === 'zubehoer') {
+          ops.push([{ op: 'patch', coll: 'bestellungen', id: o.id, fields: { status: 'erhalten', erhaltenAm: now } }, `Bestellung erhalten${o.lieferant ? ' (' + o.lieferant + ')' : ''}: ${o.menge}× ${label(o)} (Zubehör)`]);
+          undo.push([{ op: 'patch', coll: 'bestellungen', id: o.id, fields: { status: 'offen', erhaltenAm: '' } }]);
+          continue;
+        }
         const unit = U(o.kat === 'resin'), k = [o.kat, lc(o.typ), lc(o.farbe), lc(o.hersteller), o.kgProRolle].join('|');
         const ex = matchStock(o.kat, o), newId = created.get(k);
         const txt = `Bestellung erhalten${o.lieferant ? ' (' + o.lieferant + ')' : ''}: +${o.menge} ${unit.many} ${label(o)}`;
@@ -1315,7 +1346,7 @@
       }
       commitAll(ops);
       if (navigator.vibrate) navigator.vibrate(20);
-      toast(`${list.length} Position(en) erhalten und ins Inventar gebucht.`, false, () => { undo[0][1] = 'Wareneingang rückgängig gemacht'; commitAll(undo); });
+      toast(list.every(o => o.kat === 'zubehoer') ? `${list.length} Position(en) als erhalten abgehakt.` : `${list.length} Position(en) erhalten und ins Inventar gebucht.`, false, () => { undo[0][1] = 'Wareneingang rückgängig gemacht'; commitAll(undo); });
     },
     cancelOrder() {
       if (!this.editBid || !confirm('Offene Positionen dieser Bestellung stornieren?')) return;
@@ -1340,13 +1371,147 @@
         const inp = e.target.closest('[data-f]'); if (!inp) return;
         const p = this.pos[+inp.closest('.opos').dataset.i], f = inp.dataset.f;
         p[f] = ['menge', 'kgProRolle', 'preis'].includes(f) ? num(inp.value) : inp.value;
-        if (f === 'kat') { p.durchmesser = p.kat === 'resin' ? 0 : 1.75; this.renderPos(); }
+        if (f === 'kat') { p.durchmesser = p.kat === 'filamente' ? 1.75 : 0; p.kgProRolle = p.kat === 'zubehoer' ? 0 : (p.kgProRolle || 1); this.renderPos(); }
         else this.updateHint(+inp.closest('.opos').dataset.i);
       });
       $('#orderPos').addEventListener('click', e => { const b = e.target.closest('[data-del]'); if (b) { this.pos.splice(+b.dataset.del, 1); this.renderPos(); } });
       $('#orderAddPos').addEventListener('click', () => { const last = this.pos[this.pos.length - 1]; this.pos.push({ kat: last?.kat || 'filamente', typ: '', farbe: '', hersteller: last?.hersteller || '', menge: 1, kgProRolle: last?.kgProRolle || 1, durchmesser: 1.75, preis: 0 }); this.renderPos(); });
       $('#orderCancelBtn').addEventListener('click', () => this.cancelOrder());
+      $('#orderShopList').addEventListener('click', e => {
+        const b = e.target.closest('[data-shop]'); if (!b) return;
+        const it = db.einkauf.find(x => x.id === b.dataset.shop); if (!it) return;
+        // leere Startzeile ersetzen
+        if (this.pos.length === 1 && !this.pos[0].typ && !this.pos[0].id) this.pos = [];
+        this.pos.push(Shop.toPos(it)); this.renderPos();
+      });
       $('#orderForm').addEventListener('submit', e => { if (e.submitter?.value === 'ok' && !this.save()) e.preventDefault(); });
+    }
+  };
+
+  // ---------- Einkaufsliste ----------
+  const ZUBEHOER = ['Düse 0,4 mm', 'Düse 0,6 mm', 'Düse 0,2 mm', 'Hotend', 'PEI-Druckplatte', 'Glatte Druckplatte', 'Texturierte Druckplatte',
+    'Isopropanol (IPA)', 'Klebestift', 'Trockenmittel (Silica Gel)', 'PTFE-Schlauch', 'Filamenttrockner', 'Spulenhalter', 'Schmierfett',
+    'Kohlefilter', 'Reinigungsfilament', 'Nitril-Handschuhe', 'FEP-Folie', 'Resin-Wanne', 'Papiertücher', 'Spachtel', 'Seitenschneider',
+    'Messschieber', 'Gewindeeinsätze (Heat-Inserts)', 'Magnete', 'Schrauben-Sortiment', 'Ersatzteil'];
+  const KAT_OPTS = k => [['filamente', 'Filament'], ['resin', 'Resin'], ['zubehoer', 'Zubehör']].map(([v, t]) => `<option value="${v}"${katOf(k) === v ? ' selected' : ''}>${t}</option>`).join('');
+  const katIcon = o => o.kat === 'zubehoer' ? '<span class="swatch zub" aria-hidden="true">🔧</span>' : swatch(o);
+  const sameArticle = (a, b) => katOf(a.kat) === katOf(b.kat) && lc(a.typ) === lc(b.typ) && lc(a.farbe) === lc(b.farbe) && lc(a.hersteller) === lc(b.hersteller);
+
+  const Shop = {
+    sel: new Set(), editId: null,
+    kat: () => $('#shopForm').elements.kat.value,
+    toPos: e => ({ kat: e.kat, typ: e.typ, farbe: e.farbe, hersteller: e.hersteller, menge: e.menge, kgProRolle: e.kgProRolle || (e.kat === 'zubehoer' ? 0 : 1), durchmesser: e.durchmesser, preis: 0, fromShop: e.id }),
+    /** Knappe Bestände, die weder auf der Liste stehen noch bestellt sind */
+    lowItems() {
+      const out = [];
+      for (const kat of ['filamente', 'resin']) for (const f of db[kat]) {
+        if (!(f.mindestbestand > 0 && f.rollen < f.mindestbestand)) continue;
+        const p = { ...f, kat };
+        if (db.einkauf.some(e => sameArticle(e, p)) || orderedFor(f, kat) > 0) continue;
+        out.push(Orders.fromItem(f, kat));
+      }
+      return out;
+    },
+    /** Mehrere Artikel aufnehmen; vorhandene gleiche Einträge werden aufgestockt. */
+    addMany(list) {
+      const ops = [];
+      for (const p of list) {
+        const ex = db.einkauf.find(e => sameArticle(e, p));
+        if (ex) ops.push([{ op: 'patch', coll: 'einkauf', id: ex.id, fields: { menge: ex.menge + (p.menge || 1) } }, `Einkaufsliste: ${label(ex)} → ${ex.menge + (p.menge || 1)}×`]);
+        else { const it = normalizeShop({ ...p, id: uid(), wer: me, t: new Date().toISOString() }); ops.push([{ op: 'add', coll: 'einkauf', id: it.id, item: it }, `Auf Einkaufsliste: ${it.menge}× ${label(it)}`]); }
+      }
+      commitAll(ops);
+      toast(`${list.length} Artikel auf der Einkaufsliste.`);
+    },
+    render() {
+      const L = db.einkauf, low = this.lowItems();
+      [...this.sel].forEach(id => { if (!L.some(e => e.id === id)) this.sel.delete(id); });
+      $('#shopCount').textContent = L.length ? `${L.length} Artikel` : '';
+      $('#shopLow').hidden = !low.length;
+      $('#shopLow').textContent = `⚠ ${low.length} knappe${low.length === 1 ? 'n Bestand' : ' Bestände'} übernehmen`;
+      const order = { filamente: 0, resin: 1, zubehoer: 2 };
+      $('#shopList').innerHTML = L.length ? [...L].sort((a, b) => order[a.kat] - order[b.kat] || a.typ.localeCompare(b.typ, 'de')).map(e => `
+        <div class="shop-item${this.sel.has(e.id) ? ' sel' : ''}${this.editId === e.id ? ' editing' : ''}" data-id="${esc(e.id)}">
+          <input type="checkbox" class="rowsel" data-sel${this.sel.has(e.id) ? ' checked' : ''} aria-label="Auswählen">
+          ${katIcon(e)}
+          <button type="button" class="t" data-edit title="Bearbeiten"><b>${e.menge}×</b> ${esc(label(e))}
+            <small>${e.kat === 'zubehoer' ? 'Zubehör' : e.kat === 'resin' ? 'Resin · ' + fmt(e.kgProRolle) + ' kg' : fmt(e.kgProRolle) + ' kg'}${e.notiz ? ' · ' + esc(e.notiz) : ''}${e.wer ? ' · ' + esc(e.wer) : ''}</small></button>
+          <span class="qty"><button type="button" class="iconbtn" data-d="-1" aria-label="Weniger">−</button><button type="button" class="iconbtn" data-d="1" aria-label="Mehr">+</button></span>
+          <button type="button" class="iconbtn del" data-del aria-label="Entfernen" title="Entfernen">🗑</button>
+        </div>`).join('') : '<p class="empty small">Die Einkaufsliste ist leer. Oben Artikel eintragen – Filament, Resin oder Zubehör wie Düsen, Druckplatten, IPA …</p>';
+      const n = this.sel.size, open = Orders.groups().filter(g => g.open.length);
+      $('#shopActions').hidden = !L.length;
+      $('#shopToNew').textContent = n ? `🛒 Ausgewählte bestellen (${n})` : `🛒 Alle bestellen (${L.length})`;
+      $('#shopToOrder').hidden = !open.length;
+      $('#shopToOrder').innerHTML = `<option value="">${n ? `Ausgewählte (${n})` : 'Alle'} zu offener Bestellung …</option>` +
+        open.map(g => `<option value="${esc(g.bid)}">${esc(g.h.lieferant || 'Bestellung')}${g.h.bestellnr ? ' · Nr. ' + esc(g.h.bestellnr) : ''} · ${dateDe(g.h.bestellt)}</option>`).join('');
+      $('#shopSelAll').hidden = !L.length;
+      $('#shopSelAll').textContent = n && n === L.length ? 'Auswahl aufheben' : 'Alle auswählen';
+    },
+    picked() { const L = db.einkauf; return this.sel.size ? L.filter(e => this.sel.has(e.id)) : L; },
+    updateForm() {
+      const f = $('#shopForm'), zub = this.kat() === 'zubehoer';
+      f.classList.toggle('zub', zub);
+      f.elements.typ.placeholder = zub ? 'Artikel, z. B. Düse 0,4 mm' : this.kat() === 'resin' ? 'Resin-Typ, z. B. ABS-Like' : 'Typ, z. B. PLA+';
+      f.elements.typ.setAttribute('list', 'odlTyp-' + this.kat());
+      $('#shopTypLbl').textContent = zub ? 'Artikel' : 'Typ';
+      f.elements.kg.placeholder = this.kat() === 'resin' ? 'kg/Fl.' : 'kg/Rolle';
+    },
+    fillDatalists() {
+      const opts = arr => [...new Set(arr.filter(Boolean))].sort((a, b) => a.localeCompare(b, 'de')).map(x => `<option value="${esc(x)}">`).join('');
+      $('#odlTyp-filamente').innerHTML = opts([...Object.keys(db.typen), ...db.filamente.map(f => f.typ)]);
+      $('#odlTyp-resin').innerHTML = opts([...RESIN_TYPEN, ...db.resin.map(f => f.typ)]);
+      $('#odlTyp-zubehoer').innerHTML = opts([...ZUBEHOER, ...db.einkauf.filter(e => e.kat === 'zubehoer').map(e => e.typ), ...db.bestellungen.filter(o => o.kat === 'zubehoer').map(o => o.typ)]);
+      $('#odlFarbe').innerHTML = opts([...db.filamente, ...db.resin].map(f => f.farbe).concat(['Schwarz', 'Weiß', 'Grau', 'Rot', 'Blau', 'Grün', 'Gelb', 'Orange', 'Transparent']));
+      $('#odlHersteller').innerHTML = opts([...db.filamente, ...db.resin, ...db.einkauf].map(f => f.hersteller));
+    },
+    submit() {
+      const f = $('#shopForm'), el = f.elements;
+      const p = { kat: this.kat(), typ: el.typ.value.trim(), farbe: el.farbe.value.trim(), hersteller: el.hersteller.value.trim(), menge: num(el.menge.value) || 1, kgProRolle: num(el.kg.value), notiz: el.notiz.value.trim() };
+      if (!p.typ) return;
+      if (this.editId) {
+        const it = normalizeShop({ ...db.einkauf.find(e => e.id === this.editId), ...p });
+        commit({ op: 'patch', coll: 'einkauf', id: it.id, fields: it }, `Einkaufsliste geändert: ${it.menge}× ${label(it)}`);
+        this.editId = null; $('#shopSubmit').textContent = '+ Hinzufügen'; $('#shopCancelEdit').hidden = true;
+      } else this.addMany([p]);
+      const kat = this.kat(); f.reset(); el.kat.value = kat; el.menge.value = 1; this.updateForm(); el.typ.focus();
+    },
+    edit(id) {
+      const e = db.einkauf.find(x => x.id === id); if (!e) return;
+      const el = $('#shopForm').elements;
+      this.editId = id; el.kat.value = e.kat; this.updateForm();
+      el.typ.value = e.typ; el.farbe.value = e.farbe; el.hersteller.value = e.hersteller; el.menge.value = e.menge; el.kg.value = e.kgProRolle || ''; el.notiz.value = e.notiz;
+      $('#shopSubmit').textContent = 'Speichern'; $('#shopCancelEdit').hidden = false;
+      this.render(); $('#shopForm').scrollIntoView({ block: 'nearest', behavior: 'smooth' }); el.typ.focus();
+    },
+    cancelEdit() { this.editId = null; const k = this.kat(); $('#shopForm').reset(); $('#shopForm').elements.kat.value = k; $('#shopSubmit').textContent = '+ Hinzufügen'; $('#shopCancelEdit').hidden = true; this.updateForm(); this.render(); },
+    bind() {
+      this.updateForm();
+      $('#shopForm').elements.kat.addEventListener('change', () => this.updateForm());
+      $('#shopForm').addEventListener('submit', e => { e.preventDefault(); this.submit(); });
+      $('#shopCancelEdit').addEventListener('click', () => this.cancelEdit());
+      $('#shopForm').elements.typ.addEventListener('focus', () => this.fillDatalists());
+      $('#shopLow').addEventListener('click', () => { const low = this.lowItems(); if (low.length) this.addMany(low); });
+      $('#shopSelAll').addEventListener('click', () => { const all = this.sel.size === db.einkauf.length; this.sel = new Set(all ? [] : db.einkauf.map(e => e.id)); this.render(); });
+      $('#shopList').addEventListener('click', e => {
+        const row = e.target.closest('.shop-item'); if (!row) return;
+        const id = row.dataset.id, it = db.einkauf.find(x => x.id === id); if (!it) return;
+        if (e.target.closest('[data-sel]')) { e.target.checked ? this.sel.add(id) : this.sel.delete(id); this.render(); return; }
+        const d = e.target.closest('[data-d]');
+        if (d) { const m = it.menge + +d.dataset.d; if (m >= 1) commit({ op: 'patch', coll: 'einkauf', id, fields: { menge: m } }, ''); return; }
+        if (e.target.closest('[data-del]')) {
+          const copy = clone(it);
+          commit({ op: 'del', coll: 'einkauf', id }, `Von Einkaufsliste entfernt: ${label(it)}`);
+          toast('Entfernt.', false, () => commit({ op: 'add', coll: 'einkauf', id: copy.id, item: copy }, `Wieder auf Einkaufsliste: ${label(copy)}`));
+          return;
+        }
+        if (e.target.closest('[data-edit]')) this.edit(id);
+      });
+      $('#shopToNew').addEventListener('click', () => { const L = this.picked(); if (L.length) { Orders.open(null, L.map(this.toPos)); this.sel.clear(); } });
+      $('#shopToOrder').addEventListener('change', e => {
+        const bid = e.target.value; e.target.value = ''; if (!bid) return;
+        const L = this.picked(); if (L.length) { Orders.open(bid, null, L.map(this.toPos)); this.sel.clear(); }
+      });
     }
   };
 
