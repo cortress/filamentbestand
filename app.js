@@ -29,6 +29,7 @@
     'TPU': 'TPU', 'TPU 95A': 'TPU', 'TPU 60A': 'TPU', 'TPU VarioShore': 'TPU',
     'PA (Nylon)': 'PA', 'PA-CF': 'PA-CF', 'PC': 'PC', 'PVA': 'PVA', 'HIPS': 'HIPS'
   };
+  const RESIN_TYPEN = ['Standard', 'ABS-Like', 'Water-Washable', 'Tough', 'Flexible', '8K', 'Plant-Based', 'High-Temp', 'Clear', 'Dental', 'Castable', 'Engineering'];
   const FARBEN = {
     schwarz: '#141414', weiß: '#f2f2f2', weiss: '#f2f2f2', grau: '#8a8d93', silber: '#c7cbd1',
     orange: '#ff7a1a', rot: '#e53935', blau: '#1e6fe0', grün: '#2fa84f', gruen: '#2fa84f', gelb: '#f6d02f',
@@ -45,6 +46,7 @@
   const num = v => { const n = parseFloat(String(v ?? '').replace(',', '.')); return isFinite(n) ? n : 0; };
   const uid = () => 'f' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
   const gesamt = f => num(f.rollen) * num(f.kgProRolle);
+  const restKg = u => (num(u.rest) / 100) * num(u.kgProRolle);
   const isLow = f => num(f.mindestbestand) > 0 && num(f.rollen) <= num(f.mindestbestand);
   const label = f => [f.typ, f.farbe].filter(Boolean).join(' · ') + (f.hersteller ? ` (${f.hersteller})` : '');
   const clone = o => (typeof structuredClone === 'function' ? structuredClone(o) : JSON.parse(JSON.stringify(o)));
@@ -104,12 +106,18 @@
   let base = emptyData(), baseSha = null, etag = null, pending = [];
   let db = emptyData();
   let me = lsGet(LS_NAME, '');
-  let ui = { q: '', gruppe: '', farbe: '', hersteller: '', knapp: false, sort: { key: 'gruppe', dir: 1 }, view: 'bestand', ...lsGet(LS_UI, {}) };
+  let ui = { q: '', gruppe: '', farbe: '', hersteller: '', knapp: false, sort: { key: 'gruppe', dir: 1 }, view: 'bestand', coll: 'filamente', ...lsGet(LS_UI, {}) };
+  if (ui.coll !== 'resin') ui.coll = 'filamente';
+  const isResin = () => ui.coll === 'resin';
+  const items = () => db[ui.coll] || db.filamente;
+  const U = (resin = isResin()) => resin
+    ? { one: 'Flasche', many: 'Flaschen', je: 'je Flasche', what: 'Resin' }
+    : { one: 'Rolle', many: 'Rollen', je: 'je Rolle', what: 'Filament' };
   const sync = { state: 'locked', last: null, msg: '', busy: false, again: false, timer: null, poll: null };
   let editingId = null;
   const selected = new Set();
 
-  function emptyData() { return { version: 2, aktualisiert: null, typen: { ...STANDARD_TYPEN }, filamente: [], verlauf: [] }; }
+  function emptyData() { return { version: 3, aktualisiert: null, typen: { ...STANDARD_TYPEN }, filamente: [], resin: [], inUse: [], drucker: [], verlauf: [] }; }
 
   function normalizeItem(f) {
     const typ = String(f.typ || '').trim();
@@ -122,32 +130,53 @@
       kgProRolle: num(f.kgProRolle ?? f.kg ?? 1),
       durchmesser: num(f.durchmesser) || 1.75,
       mindestbestand: Math.max(0, Math.round(num(f.mindestbestand))),
-      lagerort: String(f.lagerort || '').trim(), bemerkung: String(f.bemerkung || '').trim()
+      lagerort: String(f.lagerort || '').trim(), bemerkung: String(f.bemerkung || '').trim(),
+      mhd: /^\d{4}-\d{2}$/.test(f.mhd || '') ? f.mhd : ''
     };
   }
+  /** Geöffnete Rolle (im Drucker/AMS oder angebrochen im Regal). */
+  function normalizeUse(u) {
+    const typ = String(u.typ || '').trim();
+    return {
+      id: u.id || uid(), ref: u.ref || '', typ, gruppe: String(u.gruppe || '').trim() || STANDARD_TYPEN[typ] || typ,
+      farbe: String(u.farbe || '').trim(), farbcode: u.farbcode || '', hersteller: String(u.hersteller || '').trim(),
+      kgProRolle: num(u.kgProRolle) || 1, durchmesser: num(u.durchmesser) || 1.75,
+      rest: Math.max(0, Math.min(100, Math.round(num(u.rest ?? 100)))),
+      drucker: u.drucker || '', slot: u.drucker ? String(u.slot || '') : '', geoeffnet: u.geoeffnet || ''
+    };
+  }
+  function normalizePrinter(p) {
+    return { id: p.id || uid(), name: String(p.name || 'Drucker').trim().slice(0, 40), slots: Math.max(0, Math.min(16, Math.round(num(p.slots)))), ext: !!p.ext };
+  }
+  const NORM = { filamente: normalizeItem, resin: normalizeItem, inUse: normalizeUse };
   function normalize(d) {
     d = d && typeof d === 'object' ? d : {};
     const list = Array.isArray(d) ? d : (d.filamente || []);
     return {
-      version: 2, aktualisiert: d.aktualisiert || null,
+      version: 3, aktualisiert: d.aktualisiert || null,
       typen: { ...STANDARD_TYPEN, ...(d.typen || {}) },
       verlauf: Array.isArray(d.verlauf) ? d.verlauf.slice(-1000) : [],
-      filamente: list.map(normalizeItem)
+      filamente: list.map(normalizeItem),
+      resin: (Array.isArray(d.resin) ? d.resin : []).map(normalizeItem),
+      inUse: (Array.isArray(d.inUse) ? d.inUse : []).map(normalizeUse),
+      drucker: (Array.isArray(d.drucker) ? d.drucker : []).map(normalizePrinter)
     };
   }
 
   // ---------- Operationen (Grundlage für Merge) ----------
   function applyOps(data, ops) {
     for (const o of ops) {
-      const i = o.id ? data.filamente.findIndex(f => f.id === o.id) : -1;
+      const coll = NORM[o.coll] ? o.coll : 'filamente', L = data[coll], norm = NORM[coll];
+      const i = o.id ? L.findIndex(f => f.id === o.id) : -1;
       switch (o.op) {
-        case 'add': if (i < 0) data.filamente.push(normalizeItem(o.item)); break;
-        case 'patch': if (i >= 0) data.filamente[i] = normalizeItem({ ...data.filamente[i], ...o.fields, id: o.id }); break;
-        case 'delta': if (i >= 0) data.filamente[i].rollen = Math.max(0, data.filamente[i].rollen + o.d); break;
-        case 'del': if (i >= 0) data.filamente.splice(i, 1); break;
+        case 'add': if (i < 0) L.push(norm(o.item)); break;
+        case 'patch': if (i >= 0) L[i] = norm({ ...L[i], ...o.fields, id: o.id }); break;
+        case 'delta': if (i >= 0) L[i].rollen = Math.max(0, L[i].rollen + o.d); break;
+        case 'del': if (i >= 0) L.splice(i, 1); break;
         case 'typ': data.typen[o.typ] = o.gruppe; break;
         case 'regroup': data.typen[o.typ] = o.gruppe; data.filamente.forEach(f => { if (f.typ === o.typ) f.gruppe = o.gruppe; }); break;
-        case 'replace': data.filamente = o.filamente.map(normalizeItem); data.typen = { ...data.typen, ...(o.typen || {}) }; break;
+        case 'replace': data[coll] = o.filamente.map(norm); if (coll === 'filamente') data.typen = { ...data.typen, ...(o.typen || {}) }; break;
+        case 'drucker': data.drucker = (o.list || []).map(normalizePrinter); break;
       }
       if (o.log) data.verlauf.push(o.log);
       if (o.t && (!data.aktualisiert || o.t > data.aktualisiert)) data.aktualisiert = o.t;
@@ -163,7 +192,9 @@
     const t = new Date().toISOString();
     for (const [op, text, kg = 0] of list) {
       op.t = t;
+      if (!op.coll && ['add', 'patch', 'delta', 'del', 'replace'].includes(op.op)) op.coll = ui.coll;
       if (text) op.log = { t, wer: me || '?', text, kg: Math.round(kg * 1000) / 1000 };
+      if (text && op.coll === 'resin') op.log.coll = 'resin';
       pending.push(op);
     }
     recompute();
@@ -308,7 +339,7 @@
 
   async function boot() {
     bind();
-    switchView(ui.view || 'bestand');
+    switchView(ui.view || 'bestand', ui.coll);
     $('#lockName').value = me;
     let teamEnv;
     try { teamEnv = await fetchTeamEnv(); }
@@ -397,11 +428,11 @@
   function filtered() {
     const q = ui.q.trim().toLowerCase();
     const { key: k, dir } = ui.sort;
-    return db.filamente
+    return items()
       .filter(f => !ui.gruppe || f.gruppe === ui.gruppe)
       .filter(f => !ui.farbe || (f.farbe || '–') === ui.farbe)
       .filter(f => !ui.hersteller || (f.hersteller || '–') === ui.hersteller)
-      .filter(f => !ui.knapp || isLow(f) || f.rollen === 0)
+      .filter(f => !ui.knapp || isLow(f) || f.rollen === 0 || (isResin() && mhdState(f)))
       .filter(f => !q || [f.typ, f.gruppe, f.farbe, f.hersteller, f.bemerkung, f.lagerort].join(' ').toLowerCase().includes(q))
       .sort((a, b) => {
         const va = k === 'gesamt' ? gesamt(a) : a[k], vb = k === 'gesamt' ? gesamt(b) : b[k];
@@ -411,7 +442,14 @@
         return c * dir;
       });
   }
-  const uniq = (field, list = db.filamente) => [...new Set(list.map(f => f[field] || '–'))].sort((a, b) => a.localeCompare(b, 'de'));
+  /** MHD-Status (Resin): 'abgelaufen' | 'bald' (≤ 2 Monate) | '' */
+  function mhdState(f) {
+    if (!f.mhd) return '';
+    const now = new Date(), cur = now.getFullYear() * 12 + now.getMonth(), [y, m] = f.mhd.split('-').map(Number), v = y * 12 + m - 1;
+    return v < cur ? 'abgelaufen' : v - cur <= 2 ? 'bald' : '';
+  }
+  const mhdText = f => f.mhd ? f.mhd.split('-').reverse().join('/') : '–';
+  const uniq = (field, list = items()) => [...new Set(list.map(f => f[field] || '–'))].sort((a, b) => a.localeCompare(b, 'de'));
   function groupBy(list, keyFn, valFn) {
     const m = new Map();
     list.forEach(f => { const k = keyFn(f); m.set(k, (m.get(k) || 0) + valFn(f)); });
@@ -429,7 +467,7 @@
   const kpiHtml = items => items.map(([l, v, unit, cls]) => `<div class="kpi ${cls || ''}"><div class="label">${l}</div><div class="value">${v}${unit ? `<small>${unit}</small>` : ''}</div></div>`).join('');
 
   function render() {
-    renderFilters(); renderTable(); renderGrouped(); renderStats(); renderMap(); renderSyncInfo();
+    renderFilters(); renderTable(); renderGrouped(); renderStats(); renderMap(); InUse.render(); renderSyncInfo();
     $('#subline').textContent = db.aktualisiert
       ? `Stand: ${new Date(db.aktualisiert).toLocaleString('de-DE', { dateStyle: 'medium', timeStyle: 'short' })}`
       : 'Lager für unsere 3D-Drucker';
@@ -442,16 +480,16 @@
       if (cur && !values.includes(cur)) { sel.value = ''; return ''; }
       return cur;
     };
-    ui.gruppe = setOpts($('#fGruppe'), uniq('gruppe'), 'Alle Sorten', ui.gruppe);
+    ui.gruppe = setOpts($('#fGruppe'), uniq('gruppe'), isResin() ? 'Alle Typen' : 'Alle Sorten', ui.gruppe);
     ui.farbe = setOpts($('#fFarbe'), uniq('farbe'), 'Alle Farben', ui.farbe);
     ui.hersteller = setOpts($('#fHersteller'), uniq('hersteller'), 'Alle Hersteller', ui.hersteller);
     $('#fKnapp').checked = ui.knapp;
     if (document.activeElement !== $('#q')) $('#q').value = ui.q;
     const sm = $('#fSortMobile'), sv = `${ui.sort.key}:${ui.sort.dir}`;
     sm.value = [...sm.options].some(o => o.value === sv) ? sv : 'gruppe:1';
-    const counts = groupBy(db.filamente, f => f.gruppe, f => f.rollen).sort((a, b) => a[0].localeCompare(b[0], 'de'));
+    const counts = groupBy(items(), f => f.gruppe, f => f.rollen).sort((a, b) => a[0].localeCompare(b[0], 'de'));
     $('#gruppenChips').innerHTML =
-      `<button class="chip${!ui.gruppe ? ' active' : ''}" data-g="">Alle<b>${fmt(db.filamente.reduce((s, f) => s + f.rollen, 0), 0)}</b></button>` +
+      `<button class="chip${!ui.gruppe ? ' active' : ''}" data-g="">Alle<b>${fmt(items().reduce((s, f) => s + f.rollen, 0), 0)}</b></button>` +
       counts.map(([g, n]) => `<button class="chip${g === ui.gruppe ? ' active' : ''}" data-g="${esc(g)}">${esc(g)}<b>${fmt(n, 0)}</b></button>`).join('');
   }
 
@@ -465,36 +503,41 @@
     $('#tbody').innerHTML = list.map(f => `
       <tr data-id="${esc(f.id)}" class="${isLow(f) ? 'low' : ''} ${f.rollen === 0 ? 'zero' : ''} ${selected.has(f.id) ? 'selected' : ''}">
         <td class="sel"><input type="checkbox" class="rowsel" aria-label="${esc(label(f))} auswählen"${selected.has(f.id) ? ' checked' : ''}></td>
-        <td class="first">${swatch(f)}<span class="fname">${esc(f.farbe || '–')}</span>${isLow(f) ? '<span class="warnmark" title="Mindestbestand erreicht">⚠ knapp</span>' : ''}<span class="m-typ">${esc(f.typ)}</span></td>
+        <td class="first">${swatch(f)}<span class="fname">${esc(f.farbe || '–')}</span>${isLow(f) ? '<span class="warnmark" title="Mindestbestand erreicht">⚠ knapp</span>' : ''}${isResin() && mhdState(f) ? `<span class="warnmark ${mhdState(f) === 'abgelaufen' ? 'bad' : ''}">⚠ MHD ${mhdState(f)}</span>` : ''}<span class="m-typ">${esc(f.typ)}</span></td>
         <td data-l="Typ" class="col-typ">${esc(f.typ)}</td>
-        <td data-l="Sorte"><span class="badge">${esc(f.gruppe)}</span></td>
+        <td data-l="Sorte" class="col-sorte"><span class="badge">${esc(f.gruppe)}</span></td>
         <td data-l="Hersteller">${esc(f.hersteller || '–')}</td>
-        <td data-l="Rollen" class="num col-rollen"><span class="stepper"><button data-act="dec" aria-label="Eine Rolle verbraucht">−</button><span>${f.rollen}</span><button data-act="inc" aria-label="Eine Rolle hinzugefügt">+</button></span></td>
+        <td data-l="${U().many}" class="num col-rollen"><span class="stepper"><button data-act="dec" aria-label="Eine ${U().one} verbraucht">−</button><span>${f.rollen}</span><button data-act="inc" aria-label="Eine ${U().one} hinzugefügt">+</button></span></td>
         <td data-l="kg/Rolle" class="num">${fmt(f.kgProRolle)}</td>
         <td data-l="Gesamt" class="num"><b>${fmt(gesamt(f))} kg</b></td>
+        <td data-l="MHD" class="col-mhd ${mhdState(f)}">${mhdText(f)}</td>
         <td data-l="Lagerort" class="col-lager">${esc(f.lagerort || '–')}</td>
         <td data-l="Bemerkung" class="bem col-bem">${esc(f.bemerkung || '')}${f.durchmesser && f.durchmesser !== 1.75 ? ` <span class="badge">${fmt(f.durchmesser)} mm</span>` : ''}</td>
-        <td class="actions"><button class="iconbtn" data-act="edit" aria-label="Bearbeiten" title="Bearbeiten">✎</button><button class="iconbtn" data-act="dup" aria-label="Duplizieren" title="Duplizieren">⧉</button><button class="iconbtn del" data-act="del" aria-label="Löschen" title="Löschen">🗑</button></td>
+        <td class="actions">${isResin() ? '' : `<button class="iconbtn" data-act="use" aria-label="Rolle öffnen / einlegen" title="Rolle öffnen – in Verwendung nehmen"${f.rollen ? '' : ' disabled'}>⏏</button>`}<button class="iconbtn" data-act="edit" aria-label="Bearbeiten" title="Bearbeiten">✎</button><button class="iconbtn" data-act="dup" aria-label="Duplizieren" title="Duplizieren">⧉</button><button class="iconbtn del" data-act="del" aria-label="Löschen" title="Löschen">🗑</button></td>
       </tr>`).join('');
     $('#empty').hidden = list.length > 0;
     const sumR = list.reduce((s, f) => s + f.rollen, 0), sumKg = list.reduce((s, f) => s + gesamt(f), 0);
-    $('#tfoot').innerHTML = list.length ? `<tr><td class="hide-m"></td><td colspan="4">${list.length} Einträge${list.length !== db.filamente.length ? ` (von ${db.filamente.length})` : ''}</td><td class="num">${fmt(sumR, 0)} Rollen</td><td class="hide-m"></td><td class="num">${fmt(sumKg)} kg</td><td colspan="3" class="hide-m"></td></tr>` : '';
+    const nAll = items().length;
+    $('#tfoot').innerHTML = list.length ? `<tr><td class="hide-m"></td><td colspan="${isResin() ? 3 : 4}">${list.length} Einträge${list.length !== nAll ? ` (von ${nAll})` : ''}</td><td class="num">${fmt(sumR, 0)} ${U().many}</td><td class="hide-m"></td><td class="num">${fmt(sumKg)} kg</td><td colspan="${isResin() ? 4 : 3}" class="hide-m"></td></tr>` : '';
     const allSel = $('#selAll'), nSel = list.filter(f => selected.has(f.id)).length;
     allSel.checked = list.length > 0 && nSel === list.length;
     allSel.indeterminate = nSel > 0 && nSel < list.length;
     renderBulk();
-    const all = db.filamente, low = all.filter(isLow).length;
-    $('#kpiBestand').innerHTML = kpiHtml([
-      ['Rollen', fmt(all.reduce((s, f) => s + f.rollen, 0), 0)],
-      ['Gewicht', fmt(all.reduce((s, f) => s + gesamt(f), 0), 1), 'kg'],
-      ['Sorten', uniq('gruppe').length],
+    const all = items(), low = all.filter(isLow).length;
+    const kpis = [
+      [U().many, fmt(all.reduce((s, f) => s + f.rollen, 0), 0)],
+      [isResin() ? 'Menge' : 'Gewicht', fmt(all.reduce((s, f) => s + gesamt(f), 0), 1), isResin() ? 'kg/L' : 'kg'],
+      [isResin() ? 'Typen' : 'Sorten', uniq('gruppe').length],
       ['Hersteller', uniq('hersteller').filter(h => h !== '–').length],
       ['Knapp / leer', `${low} / ${all.filter(f => f.rollen === 0).length}`, '', low ? 'warn' : '']
-    ]);
+    ];
+    if (isResin()) { const ab = all.filter(f => mhdState(f)).length; kpis.push(['MHD-Warnung', ab, '', ab ? 'warn' : '']); }
+    else { const iu = db.inUse; kpis.splice(2, 0, ['In Verwendung', iu.length, `· ${fmt(iu.reduce((s, u) => s + restKg(u), 0), 1)} kg`]); }
+    $('#kpiBestand').innerHTML = kpiHtml(kpis);
   }
 
   function renderBulk() {
-    const ids = new Set(db.filamente.map(f => f.id));
+    const ids = new Set(items().map(f => f.id));
     [...selected].forEach(id => { if (!ids.has(id)) selected.delete(id); });
     $('#bulkbar').hidden = selected.size === 0;
     $('#bulkCount').textContent = selected.size;
@@ -502,19 +545,19 @@
   }
 
   function bulkAction(act) {
-    const items = db.filamente.filter(f => selected.has(f.id));
+    const sel = items().filter(f => selected.has(f.id));
     if (act === 'clear') { selected.clear(); renderTable(); return; }
-    if (!items.length) return;
+    if (!sel.length) return;
     if (act === 'inc' || act === 'dec') {
       const d = act === 'inc' ? 1 : -1;
-      const ops = items.filter(f => f.rollen + d >= 0).map(f => [{ op: 'delta', id: f.id, d }, `${d > 0 ? '+1 Rolle' : '−1 Rolle (verbraucht)'}: ${label(f)}`, d * f.kgProRolle]);
+      const ops = sel.filter(f => f.rollen + d >= 0).map(f => [{ op: 'delta', id: f.id, d }, `${d > 0 ? '+1 ' + U().one : '−1 ' + U().one + ' (verbraucht)'}: ${label(f)}`, d * f.kgProRolle]);
       commitAll(ops);
-      toast(`${ops.length} Einträge: ${d > 0 ? '+1' : '−1'} Rolle.`);
+      toast(`${ops.length} Einträge: ${d > 0 ? '+1' : '−1'} ${U().one}.`);
     }
     if (act === 'del') {
-      if (!confirm(`${items.length} Einträge wirklich löschen?\n\n${items.slice(0, 8).map(label).join('\n')}${items.length > 8 ? '\n…' : ''}`)) return;
-      const copies = items.map(clone);
-      commitAll(items.map(f => [{ op: 'del', id: f.id }, `Gelöscht: ${label(f)}`, -gesamt(f)]));
+      if (!confirm(`${sel.length} Einträge wirklich löschen?\n\n${sel.slice(0, 8).map(label).join('\n')}${sel.length > 8 ? '\n…' : ''}`)) return;
+      const copies = sel.map(clone);
+      commitAll(sel.map(f => [{ op: 'del', id: f.id }, `Gelöscht: ${label(f)}`, -gesamt(f)]));
       selected.clear(); renderTable();
       toast(`${copies.length} Einträge gelöscht.`, false, () => commitAll(copies.map(c => [{ op: 'add', id: c.id, item: c }, `Wiederhergestellt: ${label(c)}`, gesamt(c)])));
     }
@@ -546,13 +589,17 @@
     const all = db.filamente;
     const totR = all.reduce((s, f) => s + f.rollen, 0), totKg = all.reduce((s, f) => s + gesamt(f), 0);
     const since = new Date(Date.now() - 30 * 864e5).toISOString();
+    const filLog = db.verlauf.filter(v => v.coll !== 'resin');
     const recent = db.verlauf.filter(v => v.t >= since);
-    const used30 = recent.filter(v => v.kg < 0).reduce((s, v) => s - v.kg, 0);
+    const used30 = filLog.filter(v => v.t >= since && v.kg < 0).reduce((s, v) => s - v.kg, 0);
+    const iu = db.inUse, iuKg = iu.reduce((s, u) => s + restKg(u), 0);
     $('#kpiStats').innerHTML = kpiHtml([
-      ['Rollen', fmt(totR, 0)], ['Gewicht', fmt(totKg, 1), 'kg'], ['Ø kg/Rolle', fmt(totR ? totKg / totR : 0)],
-      ['Einträge', all.length], ['Verbrauch 30 T.', fmt(used30, 1), 'kg'],
+      ['Rollen (Lager)', fmt(totR, 0)], ['Gewicht (Lager)', fmt(totKg, 1), 'kg'],
+      ['In Verwendung', iu.length, `· ${fmt(iuKg, 1)} kg`],
+      ['Ø kg/Rolle', fmt(totR ? totKg / totR : 0)], ['Verbrauch 30 T.', fmt(used30, 1), 'kg'],
       ['Knapp', all.filter(isLow).length, '', all.some(isLow) ? 'warn' : '']
     ]);
+    $('#chInUse').innerHTML = iu.length ? [...iu].sort((a, b) => a.rest - b.rest).map(u => `<div class="bar"><span class="name" title="${esc(label(u))}">${swatch(u)}${esc(u.typ)}</span><span class="track"><span class="fill ${u.rest <= 15 ? 'lowfill' : ''}" style="width:${u.rest}%"></span></span><span class="v">${u.rest} %</span></div>`).join('') : '<p class="hint">Keine geöffneten Rollen.</p>';
     bars($('#chGruppeKg'), groupBy(all, f => f.gruppe, gesamt), { dec: 1 });
     bars($('#chGruppeRollen'), groupBy(all, f => f.gruppe, f => f.rollen));
     bars($('#chFarbe'), groupBy(all, f => f.farbe || '–', f => f.rollen), { withSwatch: true });
@@ -560,15 +607,15 @@
     bars($('#chGroesse'), groupBy(all, f => fmt(f.kgProRolle) + ' kg', f => f.rollen), { unit: '×' });
     bars($('#chPersonen'), groupBy(recent, v => v.wer || '?', () => 1));
 
-    const low = all.filter(f => isLow(f) || f.rollen === 0);
+    const low = [...all.filter(f => isLow(f) || f.rollen === 0), ...db.resin.filter(f => isLow(f) || f.rollen === 0).map(f => ({ ...f, resin: true }))];
     $('#lowList').innerHTML = low.length
-      ? low.map(f => `<div class="lowitem"><span>${swatch(f)}${esc(label(f))}</span><span class="r">${f.rollen} / min ${f.mindestbestand}</span></div>`).join('')
+      ? low.map(f => `<div class="lowitem"><span>${swatch(f)}${f.resin ? '<span class="badge">Resin</span> ' : ''}${esc(label(f))}</span><span class="r">${f.rollen} / min ${f.mindestbestand}</span></div>`).join('')
       : '<p class="hint">Alles im grünen Bereich. Mindestbestände lassen sich pro Filament im Bearbeiten-Dialog festlegen.</p>';
 
     const weeks = [], now = new Date(); now.setHours(0, 0, 0, 0);
     const monday = new Date(now); monday.setDate(now.getDate() - ((now.getDay() + 6) % 7));
     for (let i = 11; i >= 0; i--) { const s = new Date(monday); s.setDate(monday.getDate() - i * 7); weeks.push({ s, e: new Date(s.getTime() + 7 * 864e5), in: 0, out: 0 }); }
-    db.verlauf.forEach(v => { const t = new Date(v.t); const w = weeks.find(w => t >= w.s && t < w.e); if (w) { if (v.kg > 0) w.in += v.kg; else w.out -= v.kg; } });
+    filLog.forEach(v => { const t = new Date(v.t); const w = weeks.find(w => t >= w.s && t < w.e); if (w) { if (v.kg > 0) w.in += v.kg; else w.out -= v.kg; } });
     const wmax = Math.max(1, ...weeks.map(w => w.in + w.out));
     $('#chVerlauf').innerHTML = `<div class="weekchart">${weeks.map(w => `<div class="wk" title="Woche ab ${w.s.toLocaleDateString('de-DE')}: +${fmt(w.in, 1)} kg / −${fmt(w.out, 1)} kg"><div class="stack"><div class="in" style="height:${w.in / wmax * 100}%"></div><div class="out" style="height:${w.out / wmax * 100}%"></div></div><label>${w.s.getDate()}.${w.s.getMonth() + 1}.</label></div>`).join('')}</div>
       <div class="legend"><span><i style="background:var(--accent)"></i>Verbrauch</span><span><i style="background:var(--ok)"></i>Zugang</span></div>`;
@@ -576,6 +623,21 @@
     $('#logList').innerHTML = db.verlauf.slice(-80).reverse().map(v =>
       `<li><time>${new Date(v.t).toLocaleString('de-DE', { dateStyle: 'short', timeStyle: 'short' })}</time><span><b class="who">${esc(v.wer || '?')}</b> ${esc(v.text)}${v.kg ? ` <span class="${v.kg > 0 ? 'plus' : 'minus'}">${v.kg > 0 ? '+' : '−'}${fmt(Math.abs(v.kg))} kg</span>` : ''}</span></li>`
     ).join('') || '<li><span class="muted">Noch keine Änderungen protokolliert.</span></li>';
+
+    // Resin
+    const rs = db.resin, rFl = rs.reduce((s, f) => s + f.rollen, 0), rKg = rs.reduce((s, f) => s + gesamt(f), 0);
+    const rWarn = rs.filter(f => mhdState(f) && f.rollen > 0);
+    const rUsed = db.verlauf.filter(v => v.coll === 'resin' && v.t >= since && v.kg < 0).reduce((s, v) => s - v.kg, 0);
+    $('#kpiResin').innerHTML = kpiHtml([
+      ['Flaschen', fmt(rFl, 0)], ['Menge', fmt(rKg, 1), 'kg/L'], ['Typen', new Set(rs.map(f => f.typ)).size],
+      ['Verbrauch 30 T.', fmt(rUsed, 1), 'kg/L'], ['MHD-Warnung', rWarn.length, '', rWarn.length ? 'warn' : '']
+    ]);
+    bars($('#chResinTyp'), groupBy(rs, f => f.typ, gesamt), { dec: 1 });
+    bars($('#chResinFarbe'), groupBy(rs, f => f.farbe || '–', f => f.rollen), { withSwatch: true });
+    const mh = rs.filter(f => f.mhd && f.rollen > 0).sort((a, b) => a.mhd.localeCompare(b.mhd));
+    $('#resinMhd').innerHTML = mh.length
+      ? mh.slice(0, 12).map(f => `<div class="lowitem"><span>${swatch(f)}${esc(label(f))}</span><span class="r ${mhdState(f) || 'ok'}">${mhdText(f)}${mhdState(f) ? ' · ' + mhdState(f) : ''}</span></div>`).join('')
+      : '<p class="hint">Noch kein MHD erfasst. Das Datum lässt sich pro Resin im Bearbeiten-Dialog eintragen.</p>';
   }
 
   function renderMap() {
@@ -606,6 +668,7 @@
   // ---------- Dialog ----------
   function comboOptions(field) {
     const sortDe = a => a.filter(x => x && x !== '–').sort((x, y) => x.localeCompare(y, 'de'));
+    if (field === 'typ' && isResin()) return sortDe([...new Set([...RESIN_TYPEN, ...uniq('typ')])]);
     if (field === 'typ') return sortDe([...new Set([...Object.keys(db.typen), ...uniq('typ')])]);
     if (field === 'gruppe') return sortDe([...new Set([...Object.values(db.typen), ...uniq('gruppe')])]);
     if (field === 'farbe') return sortDe([...new Set([...uniq('farbe'), 'Schwarz', 'Weiß', 'Grau', 'Rot', 'Blau', 'Grün', 'Gelb', 'Orange', 'Transparent', 'Natur'])]);
@@ -624,20 +687,23 @@
     sel.addEventListener('change', () => {
       inp.hidden = sel.value !== '__new';
       if (!inp.hidden) inp.focus();
-      if (field === 'typ' && sel.value !== '__new') suggestGroup(sel.value);
+      if (field === 'typ' && sel.value !== '__new' && !isResin()) suggestGroup(sel.value);
       if (field === 'farbe') suggestColor(sel.value);
     });
     inp.addEventListener('change', () => { if (field === 'typ') suggestGroup(inp.value.trim()); if (field === 'farbe') suggestColor(inp.value.trim()); });
   }
   function comboValue(form, field) { const s = form.elements[field + '__sel'].value; return (s === '__new' ? form.elements[field + '__new'].value : s).trim(); }
-  function suggestGroup(typ) { buildCombo($('#itemForm .combo[data-field=gruppe]'), db.typen[typ] || db.filamente.find(f => f.typ === typ)?.gruppe || typ); }
+  function suggestGroup(typ) { if (isResin()) return; buildCombo($('#itemForm .combo[data-field=gruppe]'), db.typen[typ] || db.filamente.find(f => f.typ === typ)?.gruppe || typ); }
   function suggestColor(farbe) { const c = FARBEN[(farbe || '').toLowerCase()]; if (c) $('#itemForm').elements.farbcode.value = c; }
 
   function openDialog(f) {
     editingId = f?.id || null;
     const form = $('#itemForm');
-    const v = f || { typ: 'PLA+', gruppe: 'PLA+', farbe: '', hersteller: '', rollen: 1, kgProRolle: 1, durchmesser: 1.75, mindestbestand: 0, lagerort: '', bemerkung: '' };
-    $('#dlgTitle').textContent = editingId ? 'Filament bearbeiten' : 'Filament hinzufügen';
+    const v = f || (isResin()
+      ? { typ: 'Standard', gruppe: 'Standard', farbe: '', hersteller: '', rollen: 1, kgProRolle: 1, durchmesser: 0, mindestbestand: 0, lagerort: '', bemerkung: '', mhd: '' }
+      : { typ: 'PLA+', gruppe: 'PLA+', farbe: '', hersteller: '', rollen: 1, kgProRolle: 1, durchmesser: 1.75, mindestbestand: 0, lagerort: '', bemerkung: '' });
+    $('#dlgTitle').textContent = `${U().what} ${editingId ? 'bearbeiten' : 'hinzufügen'}`;
+    form.elements.mhd.value = v.mhd || '';
     $$('#itemForm .combo').forEach(el => buildCombo(el, v[el.dataset.field]));
     form.elements.farbcode.value = v.farbcode || FARBEN[(v.farbe || '').toLowerCase()] || '#888888';
     form.dataset.farbcodeOrig = form.elements.farbcode.value;
@@ -658,27 +724,30 @@
       kgProRolle: num(form.elements.kgProRolle.value),
       durchmesser: num(form.elements.durchmesser.value),
       mindestbestand: Math.max(0, Math.round(num(form.elements.mindestbestand.value))),
-      lagerort: form.elements.lagerort.value.trim(), bemerkung: form.elements.bemerkung.value.trim()
+      lagerort: form.elements.lagerort.value.trim(), bemerkung: form.elements.bemerkung.value.trim(),
+      mhd: isResin() ? form.elements.mhd.value : ''
     };
     if (!item.typ) { toast('Bitte einen Typ angeben.', true); return false; }
+    if (isResin()) { item.gruppe = item.typ; item.durchmesser = 0; }
     if (!item.gruppe) item.gruppe = item.typ;
-    if (!db.typen[item.typ]) commit({ op: 'typ', typ: item.typ, gruppe: item.gruppe });
+    if (!isResin() && !db.typen[item.typ]) commit({ op: 'typ', typ: item.typ, gruppe: item.gruppe });
+    const u = U();
 
     if (editingId) {
-      const f = db.filamente.find(x => x.id === editingId);
+      const f = items().find(x => x.id === editingId);
       const fields = {};
       Object.keys(item).forEach(k => { if (item[k] !== f[k]) fields[k] = item[k]; });
       if (!Object.keys(fields).length) return true;
       // Rollenänderung als Delta, damit parallele +/- anderer Personen nicht verloren gehen
-      if ('rollen' in fields) { const d = fields.rollen - f.rollen; delete fields.rollen; if (Object.keys(fields).length) commit({ op: 'patch', id: f.id, fields }); commit({ op: 'delta', id: f.id, d }, `Bearbeitet: ${label({ ...f, ...item })} (Rollen ${d > 0 ? '+' : ''}${d})`, d * item.kgProRolle); }
+      if ('rollen' in fields) { const d = fields.rollen - f.rollen; delete fields.rollen; if (Object.keys(fields).length) commit({ op: 'patch', id: f.id, fields }); commit({ op: 'delta', id: f.id, d }, `Bearbeitet: ${label({ ...f, ...item })} (${u.many} ${d > 0 ? '+' : ''}${d})`, d * item.kgProRolle); }
       else commit({ op: 'patch', id: f.id, fields }, `Bearbeitet: ${label({ ...f, ...item })}`, item.kgProRolle !== f.kgProRolle ? f.rollen * (item.kgProRolle - f.kgProRolle) : 0);
     } else {
-      const same = db.filamente.find(x => x.typ === item.typ && x.farbe === item.farbe && x.hersteller === item.hersteller && x.kgProRolle === item.kgProRolle && x.durchmesser === item.durchmesser);
-      if (same && confirm(`„${label(same)}“ mit ${fmt(same.kgProRolle)} kg/Rolle gibt es schon.\nOK = ${item.rollen} Rolle(n) dort hinzufügen\nAbbrechen = als eigenen Eintrag anlegen`)) {
-        commit({ op: 'delta', id: same.id, d: item.rollen }, `+${item.rollen} Rolle(n): ${label(same)}`, item.rollen * item.kgProRolle);
+      const same = items().find(x => x.typ === item.typ && x.farbe === item.farbe && x.hersteller === item.hersteller && x.kgProRolle === item.kgProRolle && x.durchmesser === item.durchmesser);
+      if (same && confirm(`„${label(same)}“ mit ${fmt(same.kgProRolle)} kg ${u.je} gibt es schon.\nOK = ${item.rollen} ${u.many} dort hinzufügen\nAbbrechen = als eigenen Eintrag anlegen`)) {
+        commit({ op: 'delta', id: same.id, d: item.rollen }, `+${item.rollen} ${u.many}: ${label(same)}`, item.rollen * item.kgProRolle);
       } else {
         const f = { id: uid(), ...item };
-        commit({ op: 'add', id: f.id, item: f }, `Neu: ${label(f)} – ${f.rollen} Rolle(n)`, gesamt(f));
+        commit({ op: 'add', id: f.id, item: f }, `Neu${isResin() ? ' (Resin)' : ''}: ${label(f)} – ${f.rollen} ${u.many}`, gesamt(f));
       }
     }
     toast('Gespeichert.');
@@ -687,29 +756,45 @@
 
   // ---------- Aktionen ----------
   function changeRollen(id, d) {
-    const f = db.filamente.find(x => x.id === id);
+    const f = items().find(x => x.id === id), u = U();
     if (!f || f.rollen + d < 0) return;
-    commit({ op: 'delta', id, d }, `${d > 0 ? '+1 Rolle' : '−1 Rolle (verbraucht)'}: ${label(f)}`, d * f.kgProRolle);
+    commit({ op: 'delta', id, d }, `${d > 0 ? '+1 ' + u.one : '−1 ' + u.one + ' (verbraucht)'}: ${label(f)}`, d * f.kgProRolle);
     if (navigator.vibrate) navigator.vibrate(12);
-    const nf = db.filamente.find(x => x.id === id);
-    if (nf && isLow(nf)) toast(`⚠ ${label(nf)}: nur noch ${nf.rollen} Rolle(n) – Mindestbestand ${nf.mindestbestand}.`);
+    const nf = items().find(x => x.id === id);
+    if (nf && isLow(nf)) toast(`⚠ ${label(nf)}: nur noch ${nf.rollen} ${u.many} – Mindestbestand ${nf.mindestbestand}.`);
   }
   function removeItem(id) {
-    const f = db.filamente.find(x => x.id === id); if (!f) return;
+    const f = items().find(x => x.id === id); if (!f) return;
     const copy = clone(f);
     commit({ op: 'del', id }, `Gelöscht: ${label(f)}`, -gesamt(f));
     toast(`„${label(copy)}“ gelöscht.`, false, () => commit({ op: 'add', id: copy.id, item: copy }, `Wiederhergestellt: ${label(copy)}`, gesamt(copy)));
   }
-  function switchView(v) {
+  function switchView(v, coll) {
     ui.view = v;
-    $$('.tab').forEach(t => { t.classList.toggle('active', t.dataset.view === v); t.setAttribute('aria-selected', t.dataset.view === v); });
+    if (v === 'bestand' && coll && coll !== ui.coll) {
+      ui.coll = coll; selected.clear();
+      Object.assign(ui, { q: '', gruppe: '', farbe: '', hersteller: '', knapp: false });
+      $('#q').value = '';
+      if (key) render();
+    }
+    applyCollLabels();
+    $$('.tab').forEach(t => { const on = t.dataset.view === v && (v !== 'bestand' || t.dataset.coll === ui.coll); t.classList.toggle('active', on); t.setAttribute('aria-selected', on); });
     $$('.view').forEach(s => s.classList.toggle('active', s.id === 'view-' + v));
     lsSet(LS_UI, ui);
     window.scrollTo({ top: 0 });
   }
 
+  function applyCollLabels() {
+    const r = isResin();
+    document.body.classList.toggle('coll-resin', r);
+    const L = { rollen: r ? 'Flaschen' : 'Rollen', kgkurz: r ? 'kg/Fl.' : 'kg/Rolle', kglang: r ? 'Inhalt je Flasche (kg bzw. L)' : 'kg je Rolle', mind: `Mindestbestand (${r ? 'Flaschen' : 'Rollen'})` };
+    $$('[data-lbl]').forEach(el => { el.textContent = L[el.dataset.lbl]; });
+    $('#btnAdd').textContent = r ? '+ Resin' : '+ Filament';
+    $('#q').placeholder = `Suchen (Typ, Farbe, Hersteller …) in ${r ? 'Resin' : 'Filament'}`;
+  }
+
   // ---------- Import / Export ----------
-  const CSV_COLS = [['typ', 'Typ'], ['gruppe', 'Sorte'], ['farbe', 'Farbe'], ['farbcode', 'Farbcode'], ['hersteller', 'Hersteller'], ['rollen', 'Rollen'], ['kgProRolle', 'kg je Rolle'], ['gesamt', 'Gesamt kg'], ['durchmesser', 'Durchmesser mm'], ['mindestbestand', 'Mindestbestand'], ['lagerort', 'Lagerort'], ['bemerkung', 'Bemerkung']];
+  const CSV_COLS = [['typ', 'Typ'], ['gruppe', 'Sorte'], ['farbe', 'Farbe'], ['farbcode', 'Farbcode'], ['hersteller', 'Hersteller'], ['rollen', 'Rollen'], ['kgProRolle', 'kg je Rolle'], ['gesamt', 'Gesamt kg'], ['durchmesser', 'Durchmesser mm'], ['mindestbestand', 'Mindestbestand'], ['lagerort', 'Lagerort'], ['bemerkung', 'Bemerkung'], ['mhd', 'MHD']];
   function download(name, content, type) {
     const a = document.createElement('a');
     a.href = URL.createObjectURL(new Blob([content], { type })); a.download = name;
@@ -719,7 +804,7 @@
   function exportCsv() {
     const q = v => { const s = typeof v === 'number' ? String(v).replace('.', ',') : String(v ?? ''); return /[;"\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
     const rows = [CSV_COLS.map(c => c[1]).join(';'), ...filtered().map(f => CSV_COLS.map(([k]) => q(k === 'gesamt' ? gesamt(f) : f[k])).join(';'))];
-    download(`filamentbestand-${new Date().toISOString().slice(0, 10)}.csv`, '﻿' + rows.join('\r\n'), 'text/csv;charset=utf-8');
+    download(`${isResin() ? 'resinbestand' : 'filamentbestand'}-${new Date().toISOString().slice(0, 10)}.csv`, '﻿' + rows.join('\r\n'), 'text/csv;charset=utf-8');
   }
   function exportJson() { download(`filamentbestand-${new Date().toISOString().slice(0, 10)}.json`, JSON.stringify(db, null, 2), 'application/json'); }
   function parseCsv(text) {
@@ -770,7 +855,7 @@
   // ---------- Events ----------
   function bind() {
     $('#lockForm').addEventListener('submit', onLockSubmit);
-    $$('.tab').forEach(t => t.addEventListener('click', () => switchView(t.dataset.view)));
+    $$('.tab').forEach(t => t.addEventListener('click', () => switchView(t.dataset.view, t.dataset.coll)));
     let qt; $('#q').addEventListener('input', e => { clearTimeout(qt); qt = setTimeout(() => { ui.q = e.target.value; renderTable(); lsSet(LS_UI, ui); }, 120); });
     $('#fGruppe').addEventListener('change', e => { ui.gruppe = e.target.value; render(); });
     $('#fFarbe').addEventListener('change', e => { ui.farbe = e.target.value; render(); });
@@ -786,8 +871,9 @@
     }));
     $('#tbody').addEventListener('click', e => {
       const b = e.target.closest('button[data-act]'); if (!b) return;
-      const id = b.closest('tr').dataset.id, f = db.filamente.find(x => x.id === id);
+      const id = b.closest('tr').dataset.id, f = items().find(x => x.id === id);
       switch (b.dataset.act) {
+        case 'use': Use.openLoad({ src: 'f:' + id }); break;
         case 'inc': changeRollen(id, 1); break;
         case 'dec': changeRollen(id, -1); break;
         case 'edit': openDialog(f); break;
@@ -795,7 +881,7 @@
         case 'del': if (confirm(`„${label(f)}“ wirklich löschen?`)) removeItem(id); break;
       }
     });
-    $('#tbody').addEventListener('dblclick', e => { const tr = e.target.closest('tr'); if (tr && !e.target.closest('button')) openDialog(db.filamente.find(x => x.id === tr.dataset.id)); });
+    $('#tbody').addEventListener('dblclick', e => { const tr = e.target.closest('tr'); if (tr && !e.target.closest('button')) openDialog(items().find(x => x.id === tr.dataset.id)); });
     $('#btnAdd').addEventListener('click', () => openDialog(null));
     $('#tbody').addEventListener('change', e => {
       const cb = e.target.closest('.rowsel'); if (!cb) return;
@@ -806,7 +892,7 @@
     });
     $('#selAll').addEventListener('change', e => { filtered().forEach(f => e.target.checked ? selected.add(f.id) : selected.delete(f.id)); renderTable(); });
     $('#bulkbar').addEventListener('click', e => { const b = e.target.closest('[data-bulk]'); if (b) bulkAction(b.dataset.bulk); });
-    Scan.bind();
+    Scan.bind(); InUse.bind(); Use.bind(); Printers.bind();
     $('#aiForm').addEventListener('submit', async e => {
       e.preventDefault();
       const k = e.target.elements.key.value.trim(), btn = e.submitter;
@@ -875,7 +961,7 @@
     window.addEventListener('offline', () => key && setCloud('offline'));
     document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible' && key) runSync(); });
     document.addEventListener('keydown', e => {
-      if (!key || e.target.matches('input, select, textarea') || $('#dlg').open || $('#scanDlg').open || e.ctrlKey || e.metaKey || e.altKey) return;
+      if (!key || e.target.matches('input, select, textarea') || $('#dlg').open || $('#scanDlg').open || $('#useDlg').open || $('#printerDlg').open || e.ctrlKey || e.metaKey || e.altKey) return;
       if (e.key === 'n' || e.key === 'N') { e.preventDefault(); openDialog(null); }
       if (e.key === 'f' || e.key === 'F') { e.preventDefault(); Scan.open(); }
       if (e.key === 'Escape' && selected.size) { selected.clear(); renderTable(); }
@@ -891,6 +977,7 @@
     engine: () => (team.anthropicKey && $('input[name=engine]:checked').value === 'ai' ? 'ai' : 'local'),
     open() {
       if (!key) return;
+      if (isResin()) switchView('bestand', 'filamente');
       $('#engineSeg').hidden = !team.anthropicKey;
       if (team.anthropicKey) $('input[name=engine][value=ai]').checked = true;
       this.step(1);
@@ -989,11 +1076,11 @@
       const src = this.mode() === 'etikett' ? 'Etikett' : 'Lieferschein';
       for (const r of used) {
         const ex = this.existing(r);
-        if (ex) { ops.push([{ op: 'delta', id: ex.id, d: r.rollen }, `Foto-Import (${src}): +${r.rollen} Rolle(n) ${label(ex)}`, r.rollen * ex.kgProRolle]); continue; }
+        if (ex) { ops.push([{ op: 'delta', coll: 'filamente', id: ex.id, d: r.rollen }, `Foto-Import (${src}): +${r.rollen} Rolle(n) ${label(ex)}`, r.rollen * ex.kgProRolle]); continue; }
         const gruppe = db.typen[r.typ] || STANDARD_TYPEN[r.typ] || r.typ.replace(/\s+(Matte|Silk|Metal|StoneFill|Composite|\d{2}A|VarioShore)$/i, '');
         if (!db.typen[r.typ]) ops.push([{ op: 'typ', typ: r.typ, gruppe }]);
         const item = { id: uid(), typ: r.typ, gruppe, farbe: r.farbe, farbcode: '', hersteller: r.hersteller, rollen: r.rollen, kgProRolle: r.kgProRolle, durchmesser: r.durchmesser, mindestbestand: 0, lagerort: '', bemerkung: '' };
-        ops.push([{ op: 'add', id: item.id, item }, `Foto-Import (${src}): Neu ${label(item)} – ${r.rollen} Rolle(n)`, r.rollen * r.kgProRolle]);
+        ops.push([{ op: 'add', coll: 'filamente', id: item.id, item }, `Foto-Import (${src}): Neu ${label(item)} – ${r.rollen} Rolle(n)`, r.rollen * r.kgProRolle]);
       }
       commitAll(ops);
       $('#scanDlg').close();
@@ -1019,7 +1106,211 @@
     }
   };
 
+  // ---------- In Verwendung (geöffnete Rollen, AMS / Drucker) ----------
+  /** Platzbezeichnungen eines Druckers: AMS-Plätze A1–A4, B1–B4 … bzw. „Spule“, plus „Ext“. */
+  function slotsOf(p) {
+    const out = [];
+    for (let i = 0; i < p.slots; i++) out.push(p.slots === 1 ? 'Spule' : `${String.fromCharCode(65 + Math.floor(i / 4))}${(i % 4) + 1}`);
+    if (p.ext) out.push('Ext');
+    return out;
+  }
+  const printerName = id => db.drucker.find(p => p.id === id)?.name || '';
+  const placeText = u => u.drucker ? `${printerName(u.drucker) || 'Drucker'} · ${u.slot}` : 'Regal (angebrochen)';
+  const useLabel = u => `${label(u)}`;
+
+  const InUse = {
+    render() {
+      const iu = db.inUse, free = db.drucker.reduce((n, p) => n + slotsOf(p).filter(s => !iu.some(u => u.drucker === p.id && u.slot === s)).length, 0);
+      const low = iu.filter(u => u.rest <= 15).length;
+      $('#kpiInUse').innerHTML = kpiHtml([
+        ['Geöffnete Rollen', iu.length], ['Rest gesamt', fmt(iu.reduce((s, u) => s + restKg(u), 0), 1), 'kg'],
+        ['Im Drucker', iu.filter(u => u.drucker).length], ['Freie Plätze', free],
+        ['Fast leer (≤ 15 %)', low, '', low ? 'warn' : '']
+      ]);
+      $('#printerGrid').innerHTML = db.drucker.length ? db.drucker.map(p => {
+        const slots = slotsOf(p);
+        return `<div class="card printer"><h3>${esc(p.name)} <span class="unit">${p.slots ? `${p.slots} AMS-Plätze` : 'ohne AMS'}${p.ext ? ' + extern' : ''}</span></h3>
+          <div class="slots">${slots.map(sl => {
+            const u = iu.find(x => x.drucker === p.id && x.slot === sl);
+            if (!u) return `<button class="slot empty" data-p="${esc(p.id)}" data-s="${esc(sl)}"><span class="sl">${esc(sl)}</span><span class="plus">+</span><span class="t">frei</span></button>`;
+            return `<button class="slot ${u.rest <= 15 ? 'low' : ''}" data-u="${esc(u.id)}" title="${esc(useLabel(u))} – ${u.rest} %">
+              <span class="sl">${esc(sl)}</span>${swatch(u).replace('class="swatch', 'class="swatch big')}
+              <span class="t">${esc(u.typ)}</span><span class="h">${esc(u.farbe || '')}${u.hersteller ? ' · ' + esc(u.hersteller) : ''}</span>
+              <span class="restbar"><span style="width:${u.rest}%"></span></span><span class="pct">${u.rest} % · ${fmt(restKg(u) * 1000, 0)} g</span></button>`;
+          }).join('')}</div></div>`;
+      }).join('') : `<div class="card empty-printers"><p>Noch keine Drucker angelegt.</p><button class="btn primary" data-act="printers">Drucker anlegen</button></div>`;
+      const shelf = iu.filter(u => !u.drucker);
+      $('#shelfCount').textContent = shelf.length ? `${shelf.length} Rolle(n) · ${fmt(shelf.reduce((s, u) => s + restKg(u), 0), 1)} kg` : '';
+      $('#shelfList').innerHTML = shelf.length ? shelf.map(u => `<button class="shelf-item" data-u="${esc(u.id)}">${swatch(u)}<span class="t">${esc(useLabel(u))}</span><span class="restbar"><span style="width:${u.rest}%"></span></span><span class="pct">${u.rest} %</span></button>`).join('')
+        : '<p class="hint">Keine angebrochenen Rollen außerhalb der Drucker.</p>';
+    },
+    bind() {
+      $('#printerGrid').addEventListener('click', e => {
+        const b = e.target.closest('button'); if (!b) return;
+        if (b.dataset.act === 'printers') return Printers.open();
+        if (b.dataset.u) return Use.openEdit(b.dataset.u);
+        if (b.dataset.p) return Use.openLoad({ place: `${b.dataset.p}|${b.dataset.s}` });
+      });
+      $('#shelfList').addEventListener('click', e => { const b = e.target.closest('[data-u]'); if (b) Use.openEdit(b.dataset.u); });
+      $('#btnUseNew').addEventListener('click', () => Use.openLoad({}));
+      $('#btnPrinters').addEventListener('click', () => Printers.open());
+    }
+  };
+
+  const Use = {
+    mode: 'load', editId: null,
+    placeOptions(currentId) {
+      const opts = [`<option value="">Regal – nicht im Drucker</option>`];
+      for (const p of db.drucker) {
+        opts.push(`<optgroup label="${esc(p.name)}">` + slotsOf(p).map(sl => {
+          const occ = db.inUse.find(u => u.drucker === p.id && u.slot === sl && u.id !== currentId);
+          return `<option value="${esc(p.id)}|${esc(sl)}">${esc(p.name)} · ${esc(sl)}${occ ? ` (belegt: ${esc(occ.typ)} ${esc(occ.farbe)} → kommt ins Regal)` : ' (frei)'}</option>`;
+        }).join('') + '</optgroup>');
+      }
+      return opts.join('');
+    },
+    openLoad({ src = '', place = '' }) {
+      if (!key) return;
+      this.mode = 'load'; this.editId = null;
+      const shelf = db.inUse.filter(u => !u.drucker), stock = db.filamente.filter(f => f.rollen > 0).sort((a, b) => label(a).localeCompare(label(b), 'de'));
+      if (!shelf.length && !stock.length) return toast('Keine Rollen im Lager vorhanden.', true);
+      $('#useTitle').textContent = 'Rolle einlegen / öffnen';
+      $('#useHead').innerHTML = '';
+      $('#useSrcWrap').hidden = false; $('#useSrc').required = true;
+      $('#useSrc').innerHTML = (shelf.length ? `<optgroup label="Angebrochen (Regal)">${shelf.map(u => `<option value="u:${esc(u.id)}">${esc(useLabel(u))} – ${u.rest} %</option>`).join('')}</optgroup>` : '')
+        + `<optgroup label="Neue Rolle aus dem Lager öffnen">${stock.map(f => `<option value="f:${esc(f.id)}">${esc(label(f))} · ${fmt(f.kgProRolle)} kg (${f.rollen} im Lager)</option>`).join('')}</optgroup>`;
+      if (src) $('#useSrc').value = src;
+      $('#usePlace').innerHTML = this.placeOptions(null);
+      $('#usePlace').value = place || (db.drucker.length ? this.firstFree() : '');
+      this.syncRest(); $('#useExtra').hidden = true;
+      $('#useDlg').showModal();
+    },
+    firstFree() {
+      for (const p of db.drucker) for (const sl of slotsOf(p)) if (!db.inUse.some(u => u.drucker === p.id && u.slot === sl)) return `${p.id}|${sl}`;
+      return '';
+    },
+    openEdit(id) {
+      const u = db.inUse.find(x => x.id === id); if (!u) return;
+      this.mode = 'edit'; this.editId = id;
+      $('#useTitle').textContent = 'Geöffnete Rolle';
+      $('#useHead').innerHTML = `${swatch(u)}<b>${esc(useLabel(u))}</b><small>${esc(placeText(u))}${u.geoeffnet ? ' · geöffnet ' + new Date(u.geoeffnet).toLocaleDateString('de-DE') : ''}</small>`;
+      $('#useSrcWrap').hidden = true; $('#useSrc').required = false; $('#useSrc').innerHTML = '';
+      $('#usePlace').innerHTML = this.placeOptions(id);
+      $('#usePlace').value = u.drucker ? `${u.drucker}|${u.slot}` : '';
+      $('#useRest').value = u.rest; this.syncRest();
+      $('#useExtra').hidden = false;
+      $('#useBack').hidden = !(u.rest === 100 && db.filamente.some(f => f.id === u.ref));
+      $('#useDlg').showModal();
+    },
+    srcItem() {
+      if (this.mode === 'edit') return db.inUse.find(x => x.id === this.editId);
+      const v = $('#useSrc').value || '';
+      return v.startsWith('u:') ? db.inUse.find(x => x.id === v.slice(2)) : db.filamente.find(x => x.id === v.slice(2));
+    },
+    syncRest() {
+      if (this.mode === 'load') {
+        const v = $('#useSrc').value || '';
+        if (v.startsWith('f:')) $('#useRest').value = 100;
+        else if (v.startsWith('u:')) $('#useRest').value = db.inUse.find(x => x.id === v.slice(2))?.rest ?? 100;
+      }
+      const it = this.srcItem(), r = +$('#useRest').value;
+      $('#useRestOut').textContent = r;
+      $('#useRestKg').textContent = it ? `${fmt(r / 100 * it.kgProRolle * 1000, 0)} g von ${fmt(it.kgProRolle * 1000, 0)} g` : '';
+    },
+    /** Belegten Platz freimachen (Rolle ins Regal) */
+    evictOps(pid, sl, exceptId) {
+      const occ = db.inUse.find(u => u.drucker === pid && u.slot === sl && u.id !== exceptId);
+      return occ ? [[{ op: 'patch', coll: 'inUse', id: occ.id, fields: { drucker: '', slot: '' } }, `Ins Regal: ${useLabel(occ)} (von ${placeText(occ)})`, 0]] : [];
+    },
+    save() {
+      const [pid = '', sl = ''] = ($('#usePlace').value || '').split('|');
+      const rest = +$('#useRest').value, ops = [];
+      const where = pid ? `${printerName(pid)} · ${sl}` : 'Regal';
+      if (this.mode === 'load') {
+        const v = $('#useSrc').value || '';
+        if (v.startsWith('f:')) {
+          const f = db.filamente.find(x => x.id === v.slice(2)); if (!f || f.rollen < 1) return toast('Diese Rolle ist nicht mehr im Lager.', true);
+          if (pid) ops.push(...this.evictOps(pid, sl));
+          const nu = normalizeUse({ ref: f.id, typ: f.typ, gruppe: f.gruppe, farbe: f.farbe, farbcode: f.farbcode, hersteller: f.hersteller, kgProRolle: f.kgProRolle, durchmesser: f.durchmesser, rest, drucker: pid, slot: sl, geoeffnet: new Date().toISOString() });
+          ops.push([{ op: 'delta', coll: 'filamente', id: f.id, d: -1 }]);
+          ops.push([{ op: 'add', coll: 'inUse', id: nu.id, item: nu }, `Geöffnet: ${label(f)} → ${where}`, 0]);
+        } else if (v.startsWith('u:')) {
+          const u = db.inUse.find(x => x.id === v.slice(2)); if (!u) return;
+          if (pid) ops.push(...this.evictOps(pid, sl, u.id));
+          ops.push([{ op: 'patch', coll: 'inUse', id: u.id, fields: { drucker: pid, slot: sl, rest } }, `Eingelegt: ${useLabel(u)} → ${where}`, rest < u.rest ? -(u.rest - rest) / 100 * u.kgProRolle : 0]);
+        }
+      } else {
+        const u = db.inUse.find(x => x.id === this.editId); if (!u) return;
+        const moved = (u.drucker || '') !== pid || (u.slot || '') !== sl, fields = {};
+        if (moved) { if (pid) ops.push(...this.evictOps(pid, sl, u.id)); fields.drucker = pid; fields.slot = sl; }
+        if (rest !== u.rest) fields.rest = rest;
+        if (!Object.keys(fields).length) return;
+        const txt = [rest !== u.rest ? `Rest ${u.rest} % → ${rest} %` : '', moved ? `→ ${where}` : ''].filter(Boolean).join(', ');
+        ops.push([{ op: 'patch', coll: 'inUse', id: u.id, fields }, `${useLabel(u)}: ${txt}`, rest < u.rest ? -(u.rest - rest) / 100 * u.kgProRolle : 0]);
+      }
+      commitAll(ops);
+      toast('Gespeichert.');
+    },
+    empty() {
+      const u = db.inUse.find(x => x.id === this.editId); if (!u) return;
+      if (!confirm(`„${useLabel(u)}“ ist leer und wird entfernt?`)) return;
+      const copy = clone(u);
+      commit({ op: 'del', coll: 'inUse', id: u.id }, `Leer & entsorgt: ${useLabel(u)} (${placeText(u)})`, -restKg(u));
+      $('#useDlg').close();
+      toast('Rolle entfernt.', false, () => commit({ op: 'add', coll: 'inUse', id: copy.id, item: copy }, `Wiederhergestellt: ${useLabel(copy)}`, restKg(copy)));
+    },
+    back() {
+      const u = db.inUse.find(x => x.id === this.editId); if (!u) return;
+      commitAll([[{ op: 'del', coll: 'inUse', id: u.id }], [{ op: 'delta', coll: 'filamente', id: u.ref, d: 1 }, `Ungeöffnet zurück ins Lager: ${useLabel(u)}`, 0]]);
+      $('#useDlg').close(); toast('Zurück im Lager.');
+    },
+    bind() {
+      $('#useSrc').addEventListener('change', () => this.syncRest());
+      $('#useRest').addEventListener('input', () => this.syncRest());
+      $('#useQuick').addEventListener('click', e => { const b = e.target.closest('[data-r]'); if (b) { $('#useRest').value = b.dataset.r; this.syncRest(); } });
+      $('#useForm').addEventListener('submit', e => { if (e.submitter?.value === 'ok') this.save(); });
+      $('#useEmpty').addEventListener('click', () => this.empty());
+      $('#useBack').addEventListener('click', () => this.back());
+      $('#useDlg').addEventListener('click', e => { if (e.target === $('#useDlg')) $('#useDlg').close(); });
+    }
+  };
+
+  const Printers = {
+    rows: [],
+    open() {
+      this.rows = db.drucker.length ? clone(db.drucker) : [normalizePrinter({ name: 'Drucker 1', slots: 4, ext: true })];
+      this.render(); $('#printerDlg').showModal();
+    },
+    render() {
+      $('#printerRows').innerHTML = this.rows.map((p, i) => `<div class="prow" data-i="${i}">
+        <label>Name<input data-f="name" value="${esc(p.name)}" maxlength="40" required></label>
+        <label class="n">AMS-Plätze<input data-f="slots" type="number" min="0" max="16" step="1" inputmode="numeric" value="${p.slots}"></label>
+        <label class="toggle"><input type="checkbox" data-f="ext"${p.ext ? ' checked' : ''}> <span>Ext.</span></label>
+        <button type="button" class="iconbtn del" data-del="${i}" aria-label="Drucker entfernen">🗑</button></div>`).join('') || '<p class="hint">Keine Drucker.</p>';
+    },
+    save() {
+      const list = this.rows.map(normalizePrinter).filter(p => p.name);
+      const ops = [[{ op: 'drucker', list }, `Drucker aktualisiert (${list.map(p => p.name).join(', ') || 'keine'})`, 0]];
+      // Rollen in entfernten Druckern / weggefallenen Plätzen ins Regal
+      for (const u of db.inUse.filter(u => u.drucker)) {
+        const p = list.find(x => x.id === u.drucker);
+        if (!p || !slotsOf(p).includes(u.slot)) ops.push([{ op: 'patch', coll: 'inUse', id: u.id, fields: { drucker: '', slot: '' } }, `Ins Regal: ${useLabel(u)} (Platz entfällt)`, 0]);
+      }
+      commitAll(ops); toast('Drucker gespeichert.');
+    },
+    bind() {
+      $('#printerRows').addEventListener('input', e => {
+        const inp = e.target.closest('[data-f]'); if (!inp) return;
+        const r = this.rows[+inp.closest('.prow').dataset.i];
+        r[inp.dataset.f] = inp.type === 'checkbox' ? inp.checked : inp.type === 'number' ? num(inp.value) : inp.value;
+      });
+      $('#printerRows').addEventListener('click', e => { const b = e.target.closest('[data-del]'); if (b) { this.rows.splice(+b.dataset.del, 1); this.render(); } });
+      $('#printerAdd').addEventListener('click', () => { this.rows.push(normalizePrinter({ name: `Drucker ${this.rows.length + 1}`, slots: 4, ext: false })); this.render(); });
+      $('#printerForm').addEventListener('submit', e => { if (e.submitter?.value === 'ok') this.save(); });
+    }
+  };
+
   // Für Tests/Diagnose
-  window.__fb = { get state() { return { pending: pending.length, sync: sync.state, items: db.filamente.length, baseSha }; }, runSync };
+  window.__fb = { get state() { return { pending: pending.length, sync: sync.state, items: db.filamente.length, resin: db.resin.length, inUse: db.inUse.length, drucker: db.drucker.length, baseSha }; }, get db() { return db; }, runSync };
   boot();
 })();
