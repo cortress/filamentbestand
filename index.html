@@ -1,0 +1,164 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#0f1115">
+  <title>Filamentbestand</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Ccircle cx='32' cy='32' r='28' fill='%23ff8a3d'/%3E%3Ccircle cx='32' cy='32' r='11' fill='%230f1115'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <span class="logo" aria-hidden="true"></span>
+      <div>
+        <h1>Filamentbestand</h1>
+        <p class="sub" id="subline">Lager für unsere 3D-Drucker</p>
+      </div>
+    </div>
+    <nav class="tabs" role="tablist">
+      <button class="tab active" data-view="bestand" role="tab">Bestand</button>
+      <button class="tab" data-view="gruppiert" role="tab">Nach Typ &amp; Farbe</button>
+      <button class="tab" data-view="statistik" role="tab">Statistik</button>
+      <button class="tab" data-view="einstellungen" role="tab">Daten &amp; Sync</button>
+    </nav>
+    <div class="sync-state" id="syncState" title="Speicherstatus">lokal</div>
+  </header>
+
+  <main>
+    <!-- BESTAND -->
+    <section class="view active" id="view-bestand">
+      <div class="kpis" id="kpiBestand"></div>
+
+      <div class="toolbar">
+        <input type="search" id="q" placeholder="Suchen (Typ, Farbe, Hersteller, Bemerkung …)" autocomplete="off">
+        <select id="fGruppe"><option value="">Alle Sorten</option></select>
+        <select id="fFarbe"><option value="">Alle Farben</option></select>
+        <select id="fHersteller"><option value="">Alle Hersteller</option></select>
+        <label class="toggle"><input type="checkbox" id="fKnapp"> <span>Nur knapp</span></label>
+        <button class="btn ghost" id="btnReset" title="Filter zurücksetzen">Filter löschen</button>
+        <button class="btn primary" id="btnAdd">+ Filament</button>
+      </div>
+      <div class="chips" id="gruppenChips"></div>
+
+      <div class="table-wrap">
+        <table class="grid" id="tbl">
+          <thead>
+            <tr>
+              <th data-sort="farbe">Farbe</th>
+              <th data-sort="typ">Typ</th>
+              <th data-sort="gruppe">Sorte</th>
+              <th data-sort="hersteller">Hersteller</th>
+              <th data-sort="rollen" class="num">Rollen</th>
+              <th data-sort="kgProRolle" class="num">kg/Rolle</th>
+              <th data-sort="gesamt" class="num">Gesamt kg</th>
+              <th data-sort="lagerort">Lagerort</th>
+              <th data-sort="bemerkung">Bemerkung</th>
+              <th class="actions"></th>
+            </tr>
+          </thead>
+          <tbody id="tbody"></tbody>
+          <tfoot id="tfoot"></tfoot>
+        </table>
+        <p class="empty" id="empty" hidden>Keine Filamente gefunden.</p>
+      </div>
+    </section>
+
+    <!-- GRUPPIERT -->
+    <section class="view" id="view-gruppiert">
+      <p class="hint">Herstellerunabhängige Anzahl der Rollen, gruppiert nach Sorte und Farbe (wie in der Excel-Liste).</p>
+      <div class="group-grid" id="groupGrid"></div>
+    </section>
+
+    <!-- STATISTIK -->
+    <section class="view" id="view-statistik">
+      <div class="kpis" id="kpiStats"></div>
+      <div class="stat-grid">
+        <div class="card"><h3>Gewicht nach Sorte <span class="unit">kg</span></h3><div class="bars" id="chGruppeKg"></div></div>
+        <div class="card"><h3>Rollen nach Sorte</h3><div class="bars" id="chGruppeRollen"></div></div>
+        <div class="card"><h3>Rollen nach Farbe</h3><div class="bars" id="chFarbe"></div></div>
+        <div class="card"><h3>Rollen nach Hersteller</h3><div class="bars" id="chHersteller"></div></div>
+        <div class="card"><h3>Rollengrößen</h3><div class="bars" id="chGroesse"></div></div>
+        <div class="card"><h3>Knapper Bestand</h3><div id="lowList"></div></div>
+        <div class="card wide"><h3>Verbrauch &amp; Zugänge <span class="unit">letzte 12 Wochen, kg</span></h3><div id="chVerlauf"></div></div>
+        <div class="card wide"><h3>Letzte Änderungen</h3><ul class="log" id="logList"></ul></div>
+      </div>
+    </section>
+
+    <!-- EINSTELLUNGEN -->
+    <section class="view" id="view-einstellungen">
+      <div class="settings-grid">
+        <div class="card">
+          <h3>GitHub-Synchronisation</h3>
+          <p class="hint">Der Bestand liegt als <code>data/filamente.json</code> im Repository. Mit einem
+            Fine-grained Personal Access Token (Berechtigung <em>Contents: Read and write</em>, nur für dieses Repo)
+            können alle im Team Änderungen direkt ins Repo speichern. Der Token bleibt nur in diesem Browser.</p>
+          <form id="syncForm" class="form">
+            <label>Owner <input name="owner" placeholder="z. B. cortress" required></label>
+            <label>Repository <input name="repo" placeholder="filamentbestand" required></label>
+            <label>Branch <input name="branch" placeholder="main" required></label>
+            <label>Datei <input name="path" placeholder="data/filamente.json" required></label>
+            <label class="full">Token <input name="token" type="password" placeholder="github_pat_…" autocomplete="off"></label>
+            <label class="toggle full"><input type="checkbox" name="auto"> <span>Änderungen automatisch speichern</span></label>
+            <div class="row full">
+              <button class="btn" type="submit">Einstellungen sichern</button>
+              <button class="btn" type="button" id="btnPull">Von GitHub laden</button>
+              <button class="btn primary" type="button" id="btnPush">Nach GitHub speichern</button>
+            </div>
+          </form>
+        </div>
+        <div class="card">
+          <h3>Import &amp; Export</h3>
+          <p class="hint">CSV ist mit Excel kompatibel (Semikolon-getrennt, UTF-8).</p>
+          <div class="row">
+            <button class="btn" id="btnExportCsv">Export CSV</button>
+            <button class="btn" id="btnExportJson">Export JSON</button>
+          </div>
+          <div class="row">
+            <label class="btn file">Import CSV/JSON<input type="file" id="fileImport" accept=".csv,.json,text/csv,application/json" hidden></label>
+          </div>
+          <h3 class="mt">Zurücksetzen</h3>
+          <p class="hint">Lokale Änderungen verwerfen und den Stand aus dem Repository neu laden.</p>
+          <button class="btn danger" id="btnResetData">Lokale Daten verwerfen</button>
+        </div>
+        <div class="card">
+          <h3>Sorten-Zuordnung</h3>
+          <p class="hint">Welcher Typ zu welcher Sorte (Gruppe) gehört. Wird beim Anlegen automatisch vorgeschlagen.</p>
+          <div id="mapList" class="maplist"></div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <!-- MODAL -->
+  <dialog id="dlg">
+    <form method="dialog" id="itemForm" class="form">
+      <h2 id="dlgTitle">Filament</h2>
+      <label>Typ <span class="combo" data-field="typ"></span></label>
+      <label>Sorte (Gruppe) <span class="combo" data-field="gruppe"></span></label>
+      <label>Farbe <span class="combo" data-field="farbe"></span></label>
+      <label>Farbcode <input type="color" name="farbcode" value="#888888"><small class="muted">optional</small></label>
+      <label>Hersteller <span class="combo" data-field="hersteller"></span></label>
+      <label>Durchmesser
+        <select name="durchmesser"><option value="1.75">1,75 mm</option><option value="2.85">2,85 mm</option></select>
+      </label>
+      <label>Rollen <input type="number" name="rollen" min="0" step="1" required></label>
+      <label>kg je Rolle
+        <input type="number" name="kgProRolle" min="0" step="0.05" list="kgList" required>
+        <datalist id="kgList"><option value="0.25"><option value="0.5"><option value="0.75"><option value="1"><option value="2"><option value="3"><option value="5"></datalist>
+      </label>
+      <label>Mindestbestand (Rollen) <input type="number" name="mindestbestand" min="0" step="1"></label>
+      <label>Lagerort <input name="lagerort" list="lagerList"><datalist id="lagerList"></datalist></label>
+      <label class="full">Bemerkung <input name="bemerkung"></label>
+      <div class="row full end">
+        <button class="btn ghost" value="cancel" formnovalidate>Abbrechen</button>
+        <button class="btn primary" value="ok" id="dlgOk">Speichern</button>
+      </div>
+    </form>
+  </dialog>
+
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+  <script src="app.js"></script>
+</body>
+</html>
