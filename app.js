@@ -167,7 +167,7 @@
     d = d && typeof d === 'object' ? d : {};
     const list = Array.isArray(d) ? d : (d.filamente || []);
     // Unbekannte Felder (z. B. aus neueren App-Versionen) beim Speichern erhalten
-    const extra = Array.isArray(d) ? {} : Object.fromEntries(Object.entries(d).filter(([k]) => !['version', 'aktualisiert', 'typen', 'verlauf', 'filamente', 'resin', 'inUse', 'drucker', 'bestellungen'].includes(k)));
+    const extra = Array.isArray(d) ? {} : Object.fromEntries(Object.entries(d).filter(([k]) => !['version', 'aktualisiert', 'typen', 'verlauf', 'filamente', 'resin', 'inUse', 'drucker', 'bestellungen', 'codes'].includes(k)));
     return {
       ...extra,
       version: 3, aktualisiert: d.aktualisiert || null,
@@ -177,7 +177,9 @@
       resin: (Array.isArray(d.resin) ? d.resin : []).map(normalizeItem),
       inUse: (Array.isArray(d.inUse) ? d.inUse : []).map(normalizeUse),
       drucker: (Array.isArray(d.drucker) ? d.drucker : []).map(normalizePrinter),
-      bestellungen: (Array.isArray(d.bestellungen) ? d.bestellungen : []).map(normalizeOrder)
+      bestellungen: (Array.isArray(d.bestellungen) ? d.bestellungen : []).map(normalizeOrder),
+      // gelernte Barcodes/QR-Codes → Artikelangaben (Foto-Erkennung)
+      codes: d.codes && typeof d.codes === 'object' && !Array.isArray(d.codes) ? d.codes : {}
     };
   }
 
@@ -195,6 +197,7 @@
         case 'regroup': data.typen[o.typ] = o.gruppe; data.filamente.forEach(f => { if (f.typ === o.typ) f.gruppe = o.gruppe; }); break;
         case 'replace': data[coll] = o.filamente.map(norm); if (coll === 'filamente') data.typen = { ...data.typen, ...(o.typen || {}) }; break;
         case 'drucker': data.drucker = (o.list || []).map(normalizePrinter); break;
+        case 'code': if (o.info) data.codes[o.code] = o.info; else delete data.codes[o.code]; break;
       }
       if (o.log) data.verlauf.push(o.log);
       if (o.t && (!data.aktualisiert || o.t > data.aktualisiert)) data.aktualisiert = o.t;
@@ -683,6 +686,7 @@
       <dt>Repository</dt><dd><code>${esc(CFG.owner)}/${esc(CFG.repo)}</code> · <code>${esc(CFG.dataPath)}</code></dd>
       <dt>Team-Token</dt><dd>${team.token ? 'hinterlegt (verschlüsselt)' : '<span class="warn">nicht hinterlegt</span>'}</dd>
       <dt>KI-Erkennung</dt><dd>${team.anthropicKey ? 'aktiv (Claude)' : 'aus – lokale Texterkennung'}</dd>
+      <dt>Gelernte Barcodes</dt><dd>${Object.keys(db.codes || {}).length}</dd>
       <dt>Verschlüsselung</dt><dd>AES-256-GCM · PBKDF2-SHA256 (${fmt(CFG.iterations, 0)} Iterationen)</dd>`;
   }
 
@@ -1003,6 +1007,7 @@
       if (isResin()) switchView('bestand', 'filamente');
       $('#engineSeg').hidden = !team.anthropicKey;
       if (team.anthropicKey) $('input[name=engine][value=ai]').checked = true;
+      FBRecognize.setVocab({ hersteller: comboOptions('hersteller'), farben: comboOptions('farbe') });
       this.step(1);
       $('#scanDlg').showModal();
     },
@@ -1025,15 +1030,37 @@
         for (let i = 0; i < files.length; i++) {
           const f = files[i], pre = files.length > 1 ? `Bild ${i + 1}/${files.length}: ` : '';
           $('#scanThumbs').insertAdjacentHTML('beforeend', `<img src="${URL.createObjectURL(f)}" alt="Foto ${i + 1}">`);
+          // Etikett: zuerst Barcode/QR-Code suchen – bekannte Codes liefern sofort den Artikel
+          let codes = [];
+          if (mode === 'etikett') {
+            this.progress(pre + 'Suche Barcode/QR-Code …', 0.03);
+            codes = await FBRecognize.codes(f);
+            const hit = codes.find(c => db.codes[c.raw]);
+            if (hit) {
+              found.push({ ...db.codes[hit.raw], rollen: 1, codes: [hit.raw], known: true, quelle: `Barcode ${hit.raw}` });
+              this.raw.push(`[Bild ${i + 1}] ${hit.format} ${hit.raw} – bekannter Artikel`);
+              continue;
+            }
+          }
+          let cands;
           if (engine === 'ai') {
             this.progress(pre + 'KI wertet das Foto aus …', 0.5);
-            found.push(...await FBRecognize.claude(f, team.anthropicKey, mode));
+            cands = await FBRecognize.claude(f, team.anthropicKey, mode);
             this.raw.push(`[Bild ${i + 1}] per KI ausgewertet`);
           } else {
-            const text = await FBRecognize.ocr(f, (t, p) => this.progress(pre + t + ' …', p));
+            const text = await FBRecognize.ocr(f, (t, p) => this.progress(pre + t + ' …', p), mode);
             this.raw.push(`[Bild ${i + 1}]\n${text}`);
-            found.push(...FBRecognize.parseText(text, mode));
+            cands = FBRecognize.parseText(text, mode);
           }
+          if (codes.length) {
+            this.raw.push(codes.map(c => `${c.format}: ${c.raw}`).join('\n'));
+            // QR-Inhalt (Klartext/Produkt-URL) ergänzt fehlende Angaben
+            const q = codes.map(c => FBRecognize.parseCode(c.raw)).find(Boolean);
+            const c0 = cands[0] || (cands[0] = { rollen: 1, quelle: '' });
+            if (q) for (const k of ['typ', 'farbe', 'hersteller', 'kgProRolle', 'durchmesser']) if (!c0[k] && q[k]) c0[k] = q[k];
+            c0.codes = codes.map(c => c.raw);
+          }
+          found.push(...cands);
         }
       } catch (e) {
         toast(e.message, true);
@@ -1044,7 +1071,8 @@
       for (const c of found) {
         const k = [c.typ, c.farbe, c.hersteller, c.kgProRolle].join('|').toLowerCase();
         const m = merged.find(x => x.k === k);
-        if (m) m.rollen += c.rollen; else merged.push({ ...c, k });
+        if (m) { m.rollen += c.rollen; m.codes = [...new Set([...(m.codes || []), ...(c.codes || [])])]; m.known = m.known && c.known; }
+        else merged.push({ ...c, k });
       }
       this.rows = merged.map(c => this.complete(c));
       if (!this.rows.length) this.rows.push(this.complete({ rollen: 1 }));
@@ -1060,7 +1088,7 @@
         use: true, typ, farbe: this.matchName(c.farbe || '', comboOptions('farbe')) || c.farbe || '',
         hersteller: this.matchName(c.hersteller || '', comboOptions('hersteller')) || c.hersteller || '',
         rollen: Math.max(1, Math.round(c.rollen || 1)), kgProRolle: c.kgProRolle || 1,
-        durchmesser: c.durchmesser || 1.75, quelle: c.quelle || ''
+        durchmesser: c.durchmesser || 1.75, quelle: c.quelle || '', codes: c.codes || [], known: !!c.known
       };
       return r;
     },
@@ -1085,6 +1113,7 @@
             <label class="n">kg/Rolle<input data-f="kgProRolle" type="number" min="0.05" step="0.05" inputmode="decimal" value="${r.kgProRolle}"></label>
           </div>
           <div class="scan-meta">${swatch({ farbe: r.farbe })}<span class="${ex ? 'match' : 'new'}">${ex ? `→ zu vorhandenem Eintrag (${ex.rollen} Rollen) addieren` : '→ neuer Eintrag'}</span>
+            ${r.codes.length ? `<span class="code" title="${esc(r.codes.join(', '))}">${r.known ? '✔ per Barcode erkannt' : '▮▮ Barcode wird gemerkt'}</span>` : ''}
             ${r.quelle ? `<small title="${esc(r.quelle)}">„${esc(r.quelle.slice(0, 70))}${r.quelle.length > 70 ? '…' : ''}“</small>` : ''}
             <button class="iconbtn del" data-del="${i}" aria-label="Zeile entfernen">🗑</button></div>
         </div>`;
@@ -1098,6 +1127,9 @@
       const ops = [], used = this.rows.filter(r => r.use && r.typ);
       const src = this.mode() === 'etikett' ? 'Etikett' : 'Lieferschein';
       for (const r of used) {
+        // Barcode → Artikel merken (oder korrigierte Angaben aktualisieren)
+        const info = { typ: r.typ, farbe: r.farbe, hersteller: r.hersteller, kgProRolle: r.kgProRolle, durchmesser: r.durchmesser };
+        for (const code of r.codes) if (JSON.stringify(db.codes[code]) !== JSON.stringify(info)) ops.push([{ op: 'code', code, info }]);
         const ex = this.existing(r);
         if (ex) { ops.push([{ op: 'delta', coll: 'filamente', id: ex.id, d: r.rollen }, `Foto-Import (${src}): +${r.rollen} Rolle(n) ${label(ex)}`, r.rollen * ex.kgProRolle]); continue; }
         const gruppe = db.typen[r.typ] || STANDARD_TYPEN[r.typ] || r.typ.replace(/\s+(Matte|Silk|Metal|StoneFill|Composite|\d{2}A|VarioShore)$/i, '');

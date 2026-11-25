@@ -73,6 +73,7 @@ Browser (Windows / Android / iPhone)
   "inUse": [{ "id": "…", "ref": "f001", "typ": "PLA+", "farbe": "Weiß", "kgProRolle": 1, "rest": 40, "drucker": "<id>", "slot": "A2", "geoeffnet": "ISO" }],
   "drucker": [{ "id": "…", "name": "X1C Links", "slots": 4, "ext": true }],
   "bestellungen": [{ "id": "…", "bid": "…", "kat": "filamente", "typ": "PLA+", "farbe": "Schwarz", "hersteller": "eSun", "menge": 4, "kgProRolle": 1, "preis": 79.96, "lieferant": "3DJake", "bestellnr": "A-1001", "bestellt": "2026-11-25", "erwartet": "2026-11-28", "status": "offen" }],
+  "codes": { "6970294470015": { "typ": "PLA+", "farbe": "Schwarz", "hersteller": "eSun", "kgProRolle": 1, "durchmesser": 1.75 } },
   "verlauf": [{ "t": "ISO", "wer": "Anna", "text": "−1 Rolle (verbraucht): PLA+ · Weiß (eSun)", "kg": -3 }]
 }
 ```
@@ -151,7 +152,21 @@ Auswahl auf (auch `Esc`). Bulk-Aktionen werden als mehrere Operationen in einem 
 1. Art wählen: *Lieferschein* (mehrere Positionen, Menge je Zeile) oder *Etikett* (eine Rolle je Foto, mehrere Fotos möglich).
 2. Foto aufnehmen (öffnet direkt die Rückkamera) oder Bilder wählen.
 3. Erkennung:
-   - **Lokal (Standard):** Tesseract.js (Deutsch + Englisch) läuft im Browser; Bild wird verkleinert und kontrastverstärkt.
+   - **Barcode/QR-Code (nur Etikett):** Zuerst wird nach EAN/UPC/Code-128/QR/DataMatrix gesucht (nativer `BarcodeDetector` auf
+     Android/Chrome, sonst ZXing 0.21.3 von jsDelivr). Ist der Code bekannt (`codes` im Datenmodell), steht der Artikel **sofort** fest –
+     ohne Texterkennung. Unbekannte Codes werden beim Übernehmen mit den geprüften Angaben **gemerkt** (Op `code`, synchronisiert für das
+     ganze Team); Korrekturen in der Prüfliste aktualisieren den Eintrag. Inhalt von QR-Codes (Klartext/Produkt-URL) ergänzt fehlende Angaben.
+   - **Lokal (Standard):** Tesseract.js (Deutsch + Englisch) läuft im Browser, mehrstufig ohne KI:
+     1. Bild auf ~2200 px skalieren (kleine Fotos bis 2× vergrößern), Graustufen mit automatischer Kontrastspreizung (2/98-%-Perzentil).
+     2. Durchgang 1: Graustufen, Seitensegmentierung *Auto* (Lieferschein) bzw. *verstreuter Text* (Etikett).
+     3. Fehlen Angaben: Durchgang 2 mit adaptiver Schwarz-Weiß-Umwandlung (Bradley, gleicht Schatten/ungleiches Licht aus,
+        helle Schrift auf dunklem Grund wird invertiert) und anderer Segmentierung (Lieferschein: Block).
+     4. Wurde gar nichts gefunden: gedrehte Varianten 90°/270°/180° (Etiketten auf runden Spulen werden oft quer fotografiert).
+     5. Bestes Ergebnis nach Treffern (Typ, Farbe, Hersteller, Gewicht) + Erkennungssicherheit; bei Etiketten ergänzen sich die Durchgänge.
+     6. **Fehlerkorrektur** vor dem Auswerten: Wörter werden mit einem gewichteten Editierabstand gegen Materialien, Marken, Farben und die
+        eigenen Hersteller/Farben aus dem Bestand abgeglichen (optisch ähnliche Zeichen wie 0/O, 1/l/I, 5/S, 8/B, C/G zählen weniger;
+        kurze Wörter werden nur bei solchen Verwechslungen korrigiert, z. B. `PETC`→`PETG`, `P1A`→`PLA`, `8LAU`→`BLAU`).
+        Gewichte/Durchmesser: `lkg`/`1 kq`→`1 kg`, `1O00g`→`1000 g`, `1.7S rnm`→`1.75 mm`.
      Die Erkennungsdateien (~10 MB) werden beim ersten Mal von jsDelivr geladen und danach vom Browser zwischengespeichert. Fotos verlassen das Gerät nicht.
    - **KI (optional):** Ist unter *Daten & Sync* ein Claude-API-Key hinterlegt (verschlüsselt in `team.enc.json`), wird das Foto an die
      Claude-API (`claude-opus-5-5`, strukturierte JSON-Ausgabe) gesendet. Deutlich robuster bei schiefen Fotos, Tabellen und Handschrift.
@@ -161,7 +176,8 @@ Auswahl auf (auch `Esc`). Bulk-Aktionen werden als mehrere Operationen in einem 
 5. *Übernehmen* bucht alles in einem Schritt; im Verlauf steht „Foto-Import (Lieferschein/Etikett)“ mit Namen.
 
 Parser-Heuristik (`recognize.js`): erkennt ~45 Hersteller, Materialtypen inkl. Varianten (PLA+/Matte/Silk/Metal, PETG-CF, PLA-CF, TPU 95A, …),
-Farben auf Deutsch/Englisch/Französisch, Gewicht (g/kg), Durchmesser, Mengen („3 Stk“, „2x“, „Menge: 2“, Menge vor Preisspalten); Positionsnummern
+Farben auf Deutsch/Englisch/Französisch inkl. Hersteller-Farbnamen (z. B. Charcoal, Ash Grey, Navy, Sakura, Terracotta), eigene
+Hersteller-/Farbnamen aus dem Bestand, Gewicht (g/kg), Durchmesser, Mengen („3 Stk“, „2x“, „Menge: 2“, Menge vor Preisspalten); Positionsnummern
 werden nicht als Menge gewertet.
 
 ## 8. Resin
@@ -249,6 +265,8 @@ Getestet (Playwright/Chromium): Desktop 1366×768 und 1400×1000, iPhone 13, Pix
 | Foto Lieferschein (3 Positionen, Mengen 3/2/1, Positionsnummern ignoriert) per lokaler OCR | ✔ |
 | Foto Etikett (eSun PLA+ Weiß 1 kg) per lokaler OCR | ✔ |
 | Zuordnung zu vorhandenem Eintrag vs. neuer Eintrag | ✔ |
+| Erkennung ohne KI, alt → neu: Etikett 90° gedreht (nichts → vollständig), schattig/kontrastarm (ohne Gewicht → vollständig), klein + schräg (ohne Gewicht/Durchmesser → vollständig), hell auf dunkel | ✔ |
+| EAN-13 auf Etikett: 1. Scan lernt Code, 2. Scan sofort „per Barcode erkannt“ (ohne OCR); QR-Code mit Produkt-URL → Sunlu PETG Rot | ✔ Desktop & iPhone (ZXing) |
 
 | Resin anlegen (Typ, Farbe, Hersteller, Flaschen, MHD), MHD-Warnung „abgelaufen“ | ✔ Desktop & iPhone |
 | Drucker anlegen (4 + Ext, 8 Plätze → 13 Plätze), Rolle öffnen (Lager 5 → 4), Platz belegen | ✔ |
@@ -265,7 +283,7 @@ Die Tests liefen gegen eine simulierte GitHub-API; der erste echte Abgleich erfo
 
 - Service Worker für vollständige Offline-Nutzung der App-Dateien.
 - Restgewicht angebrochener Rollen (Waage/Prozent).
+- Live-Kamera-Scan für Barcodes (Video statt Einzelfoto), Ausschnitt-Auswahl im Foto vor der Texterkennung.
 - Bestellliste aus Mindestbeständen, Benachrichtigung bei Unterschreitung.
 - QR-Etiketten pro Rolle zum schnellen Ausbuchen per Handy-Kamera.
-- Barcode-/EAN-Erkennung auf Etiketten (Zuordnung über Artikelnummer).
 - Mehrere Lager/Standorte, Preise & Lieferanten-Links.

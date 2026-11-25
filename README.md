@@ -16,7 +16,8 @@ Daten **verschlüsselt** im Repository, **automatischer Sync** zwischen allen Ge
 - ☁ Cloud-Symbol oben rechts: grün = alles aktuell, gelb = ausstehend, orange = synchronisiert gerade, rot = Fehler
 - AES-256-GCM-Verschlüsselung (Team-Passwort), nichts im Klartext im Repo oder im Browser-Speicher
 - Mehrfachauswahl per Kästchen: Löschen (mit Rückgängig), ±1 Rolle für alle ausgewählten
-- 📷 Hinzufügen per Foto von Lieferschein oder Rollen-Etikett – lokale Texterkennung oder optional KI (Claude), mit Prüfliste vor dem Übernehmen
+- 📷 Hinzufügen per Foto von Lieferschein oder Rollen-Etikett – lokale Texterkennung (mehrstufig: Kontrast, Schwarz-Weiß, Drehung, OCR-Fehlerkorrektur) oder optional KI (Claude), mit Prüfliste vor dem Übernehmen
+- ▮▮ Barcode/QR-Code auf Etiketten: einmal bestätigt, wird dieselbe Rolle beim nächsten Scan sofort erkannt (fürs ganze Team)
 - 🧪 **Resin** als eigener Bereich: Flaschen, Inhalt, Resin-Typen, Mindesthaltbarkeit mit Warnung, eigene Statistik
 - 🖨 **In Verwendung**: Drucker mit AMS-Plätzen, geöffnete Rollen einlegen/verschieben, Restmenge in %, Regal für angebrochene Rollen – Verbrauch wird automatisch gebucht
 - 📦 **Bestellungen**: Bestellungen mit Positionen vermerken (auch direkt aus dem Bestand), Liefertermin/Überfällig, „✓ Erhalten“ bucht automatisch ins Inventar
