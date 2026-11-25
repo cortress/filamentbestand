@@ -152,7 +152,10 @@
   function normalize(d) {
     d = d && typeof d === 'object' ? d : {};
     const list = Array.isArray(d) ? d : (d.filamente || []);
+    // Unbekannte Felder (z. B. aus neueren App-Versionen) beim Speichern erhalten
+    const extra = Array.isArray(d) ? {} : Object.fromEntries(Object.entries(d).filter(([k]) => !['version', 'aktualisiert', 'typen', 'verlauf', 'filamente', 'resin', 'inUse', 'drucker'].includes(k)));
     return {
+      ...extra,
       version: 3, aktualisiert: d.aktualisiert || null,
       typen: { ...STANDARD_TYPEN, ...(d.typen || {}) },
       verlauf: Array.isArray(d.verlauf) ? d.verlauf.slice(-1000) : [],
