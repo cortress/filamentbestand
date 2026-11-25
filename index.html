@@ -1,0 +1,215 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="color-scheme" content="dark">
+  <meta name="theme-color" content="#0f1115">
+  <meta name="robots" content="noindex, nofollow">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Filament">
+  <meta name="format-detection" content="telephone=no">
+  <title>Filamentbestand</title>
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+  <link rel="icon" href="icons/icon-192.png" sizes="192x192" type="image/png">
+  <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <!-- SPERRBILDSCHIRM -->
+  <div class="lock" id="lock">
+    <form class="lock-card" id="lockForm" autocomplete="on">
+      <span class="logo big" aria-hidden="true"></span>
+      <h1>Filamentbestand</h1>
+      <p class="hint" id="lockMsg">Die Daten sind verschlüsselt. Bitte mit dem Team-Passwort entsperren.</p>
+      <label>Dein Name <small class="muted">(erscheint im Verlauf)</small>
+        <input name="name" id="lockName" autocomplete="nickname" required maxlength="40" placeholder="z. B. Fabian">
+      </label>
+      <label>Team-Passwort
+        <input name="password" type="password" id="lockPw" autocomplete="current-password" required>
+      </label>
+      <label class="toggle"><input type="checkbox" name="remember" checked> <span>Auf diesem Gerät angemeldet bleiben</span></label>
+      <button class="btn primary block" id="lockBtn">Entsperren</button>
+      <p class="lock-err" id="lockErr" role="alert"></p>
+    </form>
+  </div>
+
+  <header class="topbar">
+    <div class="brand">
+      <span class="logo" aria-hidden="true"></span>
+      <div>
+        <h1>Filamentbestand</h1>
+        <p class="sub" id="subline">Lager für unsere 3D-Drucker</p>
+      </div>
+    </div>
+    <nav class="tabs" role="tablist" aria-label="Ansicht">
+      <button class="tab active" data-view="bestand" role="tab"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16"/></svg><span>Bestand</span></button>
+      <button class="tab" data-view="gruppiert" role="tab"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="4" width="7" height="7" rx="1.5"/><rect x="13" y="4" width="7" height="7" rx="1.5"/><rect x="4" y="13" width="7" height="7" rx="1.5"/><rect x="13" y="13" width="7" height="7" rx="1.5"/></svg><span>Typ &amp; Farbe</span></button>
+      <button class="tab" data-view="statistik" role="tab"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 20V11M12 20V4M19 20v-6"/></svg><span>Statistik</span></button>
+      <button class="tab" data-view="einstellungen" role="tab"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12m0 0-4-4m4 4 4-4M5 21h14"/></svg><span>Daten &amp; Sync</span></button>
+    </nav>
+    <button class="cloud" id="cloud" type="button" data-state="locked" aria-live="polite" title="Synchronisationsstatus">
+      <svg viewBox="0 0 32 24" aria-hidden="true">
+        <path class="c-body" d="M9 21h15.5a5.5 5.5 0 0 0 .9-10.93A8 8 0 0 0 10.1 8.2 6.5 6.5 0 0 0 9 21z"/>
+        <path class="c-ok" d="M12.5 14.5l2.8 2.8 5.2-5.3"/>
+        <g class="c-sync"><path d="M12.5 15a4 4 0 0 1 6.9-2.6M20 15a4 4 0 0 1-6.9 2.6"/><path d="M19.6 10.2v2.4h-2.4M12.9 19.8v-2.4h2.4"/></g>
+        <path class="c-up" d="M16.2 18.5v-6.5m-2.8 2.8 2.8-2.8 2.8 2.8"/>
+        <path class="c-off" d="M6 4l20 18"/>
+        <path class="c-err" d="M16.2 10.8v4.2m0 2.6v.2"/>
+      </svg>
+      <span class="cloud-label" id="cloudLabel">gesperrt</span>
+    </button>
+  </header>
+
+  <main>
+    <!-- BESTAND -->
+    <section class="view active" id="view-bestand">
+      <div class="kpis" id="kpiBestand"></div>
+
+      <div class="toolbar">
+        <input type="search" id="q" placeholder="Suchen (Typ, Farbe, Hersteller …)" autocomplete="off" enterkeyhint="search">
+        <select id="fGruppe" aria-label="Sorte"><option value="">Alle Sorten</option></select>
+        <select id="fFarbe" aria-label="Farbe"><option value="">Alle Farben</option></select>
+        <select id="fHersteller" aria-label="Hersteller"><option value="">Alle Hersteller</option></select>
+        <select id="fSortMobile" aria-label="Sortierung" class="mobile-only">
+          <option value="gruppe:1">Sortierung: Sorte</option>
+          <option value="farbe:1">Farbe A–Z</option>
+          <option value="hersteller:1">Hersteller A–Z</option>
+          <option value="rollen:-1">Meiste Rollen</option>
+          <option value="rollen:1">Wenigste Rollen</option>
+          <option value="gesamt:-1">Meiste kg</option>
+        </select>
+        <label class="toggle"><input type="checkbox" id="fKnapp"> <span>Nur knapp</span></label>
+        <button class="btn ghost" id="btnReset" title="Filter zurücksetzen">Filter löschen</button>
+        <button class="btn primary" id="btnAdd" title="Neues Filament (Taste N)">+ Filament</button>
+      </div>
+      <div class="chips" id="gruppenChips"></div>
+
+      <div class="table-wrap">
+        <table class="grid" id="tbl">
+          <thead>
+            <tr>
+              <th data-sort="farbe">Farbe</th>
+              <th data-sort="typ">Typ</th>
+              <th data-sort="gruppe">Sorte</th>
+              <th data-sort="hersteller">Hersteller</th>
+              <th data-sort="rollen" class="num">Rollen</th>
+              <th data-sort="kgProRolle" class="num">kg/Rolle</th>
+              <th data-sort="gesamt" class="num">Gesamt kg</th>
+              <th data-sort="lagerort" class="col-lager">Lagerort</th>
+              <th data-sort="bemerkung" class="col-bem">Bemerkung</th>
+              <th class="actions"><span class="sr">Aktionen</span></th>
+            </tr>
+          </thead>
+          <tbody id="tbody"></tbody>
+          <tfoot id="tfoot"></tfoot>
+        </table>
+        <p class="empty" id="empty" hidden>Keine Filamente gefunden.</p>
+      </div>
+      <button class="fab" id="fab" aria-label="Filament hinzufügen">+</button>
+    </section>
+
+    <!-- GRUPPIERT -->
+    <section class="view" id="view-gruppiert">
+      <p class="hint">Herstellerunabhängige Anzahl der Rollen, gruppiert nach Sorte und Farbe. Antippen filtert den Bestand.</p>
+      <div class="group-grid" id="groupGrid"></div>
+    </section>
+
+    <!-- STATISTIK -->
+    <section class="view" id="view-statistik">
+      <div class="kpis" id="kpiStats"></div>
+      <div class="stat-grid">
+        <div class="card"><h3>Gewicht nach Sorte <span class="unit">kg</span></h3><div class="bars" id="chGruppeKg"></div></div>
+        <div class="card"><h3>Rollen nach Sorte</h3><div class="bars" id="chGruppeRollen"></div></div>
+        <div class="card"><h3>Rollen nach Farbe</h3><div class="bars" id="chFarbe"></div></div>
+        <div class="card"><h3>Rollen nach Hersteller</h3><div class="bars" id="chHersteller"></div></div>
+        <div class="card"><h3>Rollengrößen</h3><div class="bars" id="chGroesse"></div></div>
+        <div class="card"><h3>Knapper Bestand</h3><div id="lowList"></div></div>
+        <div class="card"><h3>Änderungen je Person <span class="unit">30 Tage</span></h3><div class="bars" id="chPersonen"></div></div>
+        <div class="card wide"><h3>Verbrauch &amp; Zugänge <span class="unit">letzte 12 Wochen, kg</span></h3><div id="chVerlauf"></div></div>
+        <div class="card wide"><h3>Letzte Änderungen</h3><ul class="log" id="logList"></ul></div>
+      </div>
+    </section>
+
+    <!-- DATEN & SYNC -->
+    <section class="view" id="view-einstellungen">
+      <div class="settings-grid">
+        <div class="card">
+          <h3>Synchronisation</h3>
+          <dl class="kv" id="syncInfo"></dl>
+          <div class="row">
+            <button class="btn primary" id="btnSyncNow">Jetzt synchronisieren</button>
+            <button class="btn" id="btnRename">Namen ändern</button>
+            <button class="btn danger" id="btnLock">Abmelden</button>
+          </div>
+          <p class="hint small">Jede Änderung wird sofort verschlüsselt auf dem Gerät gespeichert und automatisch ins Repository übertragen.
+            Gleichzeitige Änderungen mehrerer Personen werden zusammengeführt. Offline gemachte Änderungen werden nachgereicht.</p>
+        </div>
+
+        <div class="card">
+          <h3>Team-Zugang <span class="unit">Admin</span></h3>
+          <p class="hint">Für das automatische Speichern braucht das Team einen GitHub-Token (Fine-grained, nur dieses Repository,
+            <em>Contents: Read and write</em>). Er wird mit dem Team-Passwort verschlüsselt im Repo abgelegt – alle, die das Passwort kennen,
+            können dann speichern, ohne selbst einen Token zu haben.</p>
+          <form id="tokenForm" class="form one">
+            <label>GitHub-Token <input name="token" type="password" placeholder="github_pat_…" autocomplete="off" required></label>
+            <div class="row"><button class="btn primary">Token verschlüsselt hinterlegen</button></div>
+          </form>
+          <h3 class="mt">Team-Passwort ändern</h3>
+          <form id="pwForm" class="form one">
+            <label>Neues Passwort <input name="pw1" type="password" minlength="10" autocomplete="new-password" required></label>
+            <label>Wiederholen <input name="pw2" type="password" minlength="10" autocomplete="new-password" required></label>
+            <div class="row"><button class="btn">Passwort ändern &amp; neu verschlüsseln</button></div>
+          </form>
+        </div>
+
+        <div class="card">
+          <h3>Import &amp; Export</h3>
+          <p class="hint">Exportdateien sind <strong>unverschlüsselt</strong> – nur für Excel/Backups verwenden. CSV ist Excel-kompatibel.</p>
+          <div class="row">
+            <button class="btn" id="btnExportCsv">Export CSV</button>
+            <button class="btn" id="btnExportJson">Export JSON</button>
+            <label class="btn file">Import CSV/JSON<input type="file" id="fileImport" accept=".csv,.json,text/csv,application/json" hidden></label>
+          </div>
+          <h3 class="mt">Sorten-Zuordnung</h3>
+          <p class="hint">Welcher Typ zu welcher Sorte gehört – wird beim Anlegen vorgeschlagen.</p>
+          <div id="mapList" class="maplist"></div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <!-- DIALOG -->
+  <dialog id="dlg">
+    <form method="dialog" id="itemForm" class="form">
+      <div class="dlg-head full"><h2 id="dlgTitle">Filament</h2><button class="iconbtn" value="cancel" formnovalidate aria-label="Schließen">✕</button></div>
+      <label>Typ <span class="combo" data-field="typ"></span></label>
+      <label>Sorte (Gruppe) <span class="combo" data-field="gruppe"></span></label>
+      <label>Farbe <span class="combo" data-field="farbe"></span></label>
+      <label>Farbcode <span class="inline"><input type="color" name="farbcode" value="#888888"><small class="muted">optional</small></span></label>
+      <label>Hersteller <span class="combo" data-field="hersteller"></span></label>
+      <label>Durchmesser
+        <select name="durchmesser"><option value="1.75">1,75 mm</option><option value="2.85">2,85 mm</option></select>
+      </label>
+      <label>Rollen <input type="number" name="rollen" min="0" step="1" inputmode="numeric" required></label>
+      <label>kg je Rolle
+        <input type="number" name="kgProRolle" min="0" step="0.05" inputmode="decimal" list="kgList" required>
+        <datalist id="kgList"><option value="0.25"><option value="0.5"><option value="0.75"><option value="1"><option value="2"><option value="3"><option value="5"></datalist>
+      </label>
+      <label>Mindestbestand (Rollen) <input type="number" name="mindestbestand" min="0" step="1" inputmode="numeric"></label>
+      <label>Lagerort <input name="lagerort" list="lagerList" autocomplete="off"><datalist id="lagerList"></datalist></label>
+      <label class="full">Bemerkung <input name="bemerkung" autocomplete="off"></label>
+      <div class="row full end">
+        <button class="btn ghost" value="cancel" formnovalidate>Abbrechen</button>
+        <button class="btn primary" value="ok" id="dlgOk">Speichern</button>
+      </div>
+    </form>
+  </dialog>
+
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+  <script src="app.js"></script>
+</body>
+</html>

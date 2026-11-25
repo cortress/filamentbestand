@@ -1,0 +1,13 @@
+{
+  "format": "filamentbestand-enc",
+  "v": 1,
+  "typ": "team",
+  "kdf": {
+    "name": "PBKDF2",
+    "hash": "SHA-256",
+    "iterations": 600000,
+    "salt": "t5mE0Q1HskEojzaAZtZnQg=="
+  },
+  "iv": "RfEN7zwj4Hc2fPPj",
+  "ct": "84X/n5LbgOctrEP7vG/3bNXay0vwKIhkXxmqPQ=="
+}
