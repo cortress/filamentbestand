@@ -125,7 +125,7 @@
       id: f.id || uid(), typ,
       gruppe: String(f.gruppe || '').trim() || STANDARD_TYPEN[typ] || typ,
       farbe: String(f.farbe || '').trim(), farbcode: f.farbcode || '',
-      hersteller: String(f.hersteller || '').trim(),
+      hersteller: String(f.hersteller || '').trim(), artnr: String(f.artnr || '').trim().slice(0, 60),
       rollen: Math.max(0, Math.round(num(f.rollen))),
       kgProRolle: num(f.kgProRolle ?? f.kg ?? 1),
       durchmesser: num(f.durchmesser) || 1.75,
@@ -155,7 +155,7 @@
     const typ = String(o.typ || '').trim(), kat = katOf(o.kat), zub = kat === 'zubehoer';
     return {
       id: o.id || uid(), bid: o.bid || o.id || uid(), kat, typ,
-      farbe: String(o.farbe || '').trim(), hersteller: String(o.hersteller || '').trim(),
+      farbe: String(o.farbe || '').trim(), hersteller: String(o.hersteller || '').trim(), artnr: String(o.artnr || '').trim().slice(0, 60),
       menge: Math.max(1, Math.round(num(o.menge) || 1)), kgProRolle: zub ? 0 : (num(o.kgProRolle) || 1),
       durchmesser: kat === 'filamente' ? (num(o.durchmesser) || 1.75) : 0, preis: Math.max(0, num(o.preis)),
       lieferant: String(o.lieferant || '').trim(), bestellnr: String(o.bestellnr || '').trim(),
@@ -169,6 +169,7 @@
     const kat = katOf(e.kat), zub = kat === 'zubehoer';
     return {
       id: e.id || uid(), kat, typ: String(e.typ || '').trim(), farbe: String(e.farbe || '').trim(), hersteller: String(e.hersteller || '').trim(),
+      artnr: String(e.artnr || '').trim().slice(0, 60),
       menge: Math.max(1, Math.round(num(e.menge) || 1)), kgProRolle: zub ? 0 : (num(e.kgProRolle) || 1),
       durchmesser: kat === 'filamente' ? (num(e.durchmesser) || 1.75) : 0, notiz: String(e.notiz || '').trim(), wer: e.wer || '', t: e.t || ''
     };
@@ -466,7 +467,7 @@
       .filter(f => !ui.farbe || (f.farbe || '–') === ui.farbe)
       .filter(f => !ui.hersteller || (f.hersteller || '–') === ui.hersteller)
       .filter(f => !ui.knapp || isLow(f) || f.rollen === 0 || (isResin() && mhdState(f)))
-      .filter(f => !q || [f.typ, f.gruppe, f.farbe, f.hersteller, f.bemerkung, f.lagerort].join(' ').toLowerCase().includes(q))
+      .filter(f => !q || [f.typ, f.gruppe, f.farbe, f.hersteller, f.artnr, f.bemerkung, f.lagerort].join(' ').toLowerCase().includes(q))
       .sort((a, b) => {
         const va = k === 'gesamt' ? gesamt(a) : a[k], vb = k === 'gesamt' ? gesamt(b) : b[k];
         let c = (typeof va === 'number' && typeof vb === 'number') ? va - vb
@@ -540,6 +541,7 @@
         <td data-l="Typ" class="col-typ">${esc(f.typ)}</td>
         <td data-l="Sorte" class="col-sorte"><span class="badge">${esc(f.gruppe)}</span></td>
         <td data-l="Hersteller">${esc(f.hersteller || '–')}</td>
+        <td data-l="Art.-Nr." class="col-artnr${f.artnr ? '' : ' none'}">${f.artnr ? `<button class="artnr" data-act="copy" title="Art.-Nr. kopieren">${esc(f.artnr)}</button>` : '<span class="muted">–</span>'}</td>
         <td data-l="${U().many}" class="num col-rollen"><span class="stepper"><button data-act="dec" aria-label="Eine ${U().one} verbraucht">−</button><span>${f.rollen}</span><button data-act="inc" aria-label="Eine ${U().one} hinzugefügt">+</button></span></td>
         <td data-l="kg/Rolle" class="num">${fmt(f.kgProRolle)}</td>
         <td data-l="Gesamt" class="num"><b>${fmt(gesamt(f))} kg</b></td>
@@ -551,7 +553,7 @@
     $('#empty').hidden = list.length > 0;
     const sumR = list.reduce((s, f) => s + f.rollen, 0), sumKg = list.reduce((s, f) => s + gesamt(f), 0);
     const nAll = items().length;
-    $('#tfoot').innerHTML = list.length ? `<tr><td class="hide-m"></td><td colspan="${isResin() ? 3 : 4}">${list.length} Einträge${list.length !== nAll ? ` (von ${nAll})` : ''}</td><td class="num">${fmt(sumR, 0)} ${U().many}</td><td class="hide-m"></td><td class="num">${fmt(sumKg)} kg</td><td colspan="${isResin() ? 4 : 3}" class="hide-m"></td></tr>` : '';
+    $('#tfoot').innerHTML = list.length ? `<tr><td class="hide-m"></td><td colspan="${isResin() ? 4 : 5}">${list.length} Einträge${list.length !== nAll ? ` (von ${nAll})` : ''}</td><td class="num">${fmt(sumR, 0)} ${U().many}</td><td class="hide-m"></td><td class="num">${fmt(sumKg)} kg</td><td colspan="${isResin() ? 4 : 3}" class="hide-m"></td></tr>` : '';
     const allSel = $('#selAll'), nSel = list.filter(f => selected.has(f.id)).length;
     allSel.checked = list.length > 0 && nSel === list.length;
     allSel.indeterminate = nSel > 0 && nSel < list.length;
@@ -738,14 +740,14 @@
     editingId = f?.id || null;
     const form = $('#itemForm');
     const v = f || (isResin()
-      ? { typ: 'Standard', gruppe: 'Standard', farbe: '', hersteller: '', rollen: 1, kgProRolle: 1, durchmesser: 0, mindestbestand: 0, lagerort: '', bemerkung: '', mhd: '' }
-      : { typ: 'PLA+', gruppe: 'PLA+', farbe: '', hersteller: '', rollen: 1, kgProRolle: 1, durchmesser: 1.75, mindestbestand: 0, lagerort: '', bemerkung: '' });
+      ? { typ: 'Standard', gruppe: 'Standard', farbe: '', hersteller: '', artnr: '', rollen: 1, kgProRolle: 1, durchmesser: 0, mindestbestand: 0, lagerort: '', bemerkung: '', mhd: '' }
+      : { typ: 'PLA+', gruppe: 'PLA+', farbe: '', hersteller: '', artnr: '', rollen: 1, kgProRolle: 1, durchmesser: 1.75, mindestbestand: 0, lagerort: '', bemerkung: '' });
     $('#dlgTitle').textContent = `${U().what} ${editingId ? 'bearbeiten' : 'hinzufügen'}`;
     form.elements.mhd.value = v.mhd || '';
     $$('#itemForm .combo').forEach(el => buildCombo(el, v[el.dataset.field]));
     form.elements.farbcode.value = v.farbcode || FARBEN[(v.farbe || '').toLowerCase()] || '#888888';
     form.dataset.farbcodeOrig = form.elements.farbcode.value;
-    ['rollen', 'kgProRolle', 'mindestbestand', 'lagerort', 'bemerkung'].forEach(k => { form.elements[k].value = v[k] ?? ''; });
+    ['rollen', 'kgProRolle', 'mindestbestand', 'lagerort', 'bemerkung', 'artnr'].forEach(k => { form.elements[k].value = v[k] ?? ''; });
     form.elements.durchmesser.value = String(v.durchmesser || 1.75);
     $('#lagerList').innerHTML = uniq('lagerort').filter(x => x !== '–').map(x => `<option value="${esc(x)}">`).join('');
     $('#dlg').showModal();
@@ -757,7 +759,7 @@
     const item = {
       typ: comboValue(form, 'typ'), gruppe: comboValue(form, 'gruppe'), farbe,
       farbcode: picked !== '#888888' && picked !== autoColor && (picked !== form.dataset.farbcodeOrig || !autoColor) ? picked : '',
-      hersteller: comboValue(form, 'hersteller'),
+      hersteller: comboValue(form, 'hersteller'), artnr: form.elements.artnr.value.trim(),
       rollen: Math.max(0, Math.round(num(form.elements.rollen.value))),
       kgProRolle: num(form.elements.kgProRolle.value),
       durchmesser: num(form.elements.durchmesser.value),
@@ -832,7 +834,7 @@
   }
 
   // ---------- Import / Export ----------
-  const CSV_COLS = [['typ', 'Typ'], ['gruppe', 'Sorte'], ['farbe', 'Farbe'], ['farbcode', 'Farbcode'], ['hersteller', 'Hersteller'], ['rollen', 'Rollen'], ['kgProRolle', 'kg je Rolle'], ['gesamt', 'Gesamt kg'], ['durchmesser', 'Durchmesser mm'], ['mindestbestand', 'Mindestbestand'], ['lagerort', 'Lagerort'], ['bemerkung', 'Bemerkung'], ['mhd', 'MHD']];
+  const CSV_COLS = [['typ', 'Typ'], ['gruppe', 'Sorte'], ['farbe', 'Farbe'], ['farbcode', 'Farbcode'], ['hersteller', 'Hersteller'], ['artnr', 'Art.-Nr.'], ['rollen', 'Rollen'], ['kgProRolle', 'kg je Rolle'], ['gesamt', 'Gesamt kg'], ['durchmesser', 'Durchmesser mm'], ['mindestbestand', 'Mindestbestand'], ['lagerort', 'Lagerort'], ['bemerkung', 'Bemerkung'], ['mhd', 'MHD']];
   function download(name, content, type) {
     const a = document.createElement('a');
     a.href = URL.createObjectURL(new Blob([content], { type })); a.download = name;
@@ -881,6 +883,15 @@
 
   // ---------- Toast ----------
   let toastTimer;
+  async function copyText(text, msg) {
+    try { await navigator.clipboard.writeText(text); toast(msg || 'Kopiert.'); }
+    catch {
+      const t = document.createElement('textarea'); t.value = text; t.setAttribute('readonly', ''); t.style.position = 'fixed'; t.style.opacity = '0';
+      document.body.appendChild(t); t.select();
+      try { document.execCommand('copy'); toast(msg || 'Kopiert.'); } catch { toast('Kopieren nicht möglich.', true); }
+      t.remove();
+    }
+  }
   function toast(msg, err = false, undo = null) {
     const t = $('#toast');
     t.innerHTML = esc(msg) + (undo ? '<button>Rückgängig</button>' : '');
@@ -912,6 +923,7 @@
       const id = b.closest('tr').dataset.id, f = items().find(x => x.id === id);
       switch (b.dataset.act) {
         case 'use': Use.openLoad({ src: 'f:' + id }); break;
+        case 'copy': copyText(f.artnr, `Art.-Nr. ${f.artnr} kopiert.`); break;
         case 'order': Orders.open(null, [Orders.fromItem(f, ui.coll)]); break;
         case 'inc': changeRollen(id, 1); break;
         case 'dec': changeRollen(id, -1); break;
@@ -1179,6 +1191,7 @@
   /** Passender Lagereintrag (gleicher Typ, Farbe, Hersteller, Inhalt, bei Filament Durchmesser). */
   function matchStock(kat, p) {
     if (kat !== 'filamente' && kat !== 'resin') return null;
+    if (p.artnr) { const byNr = db[kat].find(f => f.artnr && lc(f.artnr) === lc(p.artnr)); if (byNr) return byNr; }
     return db[kat].find(f => lc(f.typ) === lc(p.typ) && lc(f.farbe) === lc(p.farbe) && lc(f.hersteller) === lc(p.hersteller)
       && Math.abs(f.kgProRolle - p.kgProRolle) < 0.01 && (kat === 'resin' || Math.abs((f.durchmesser || 1.75) - (p.durchmesser || 1.75)) < 0.01));
   }
@@ -1226,7 +1239,7 @@
             <span class="state ${g.state}">${stateTxt}</span>
           </div>
           <div class="order-pos">${g.list.map(o => `<div class="opos-item ${o.status}">
-            ${katIcon(o)}<span class="t"><b>${o.menge}×</b> ${esc(label(o))} <small>${o.kat === 'zubehoer' ? 'Zubehör' : fmt(o.kgProRolle) + ' kg'}${o.kat === 'resin' ? ' · Resin' : ''}${o.preis ? ` · ${fmt(o.preis, 2)} €` : ''}</small></span>
+            ${katIcon(o)}<span class="t"><b>${o.menge}×</b> ${esc(label(o))}${o.artnr ? ` <button class="artnr" data-copy="${esc(o.artnr)}" title="Art.-Nr. kopieren">Art. ${esc(o.artnr)}</button>` : ''} <small>${o.kat === 'zubehoer' ? 'Zubehör' : fmt(o.kgProRolle) + ' kg'}${o.kat === 'resin' ? ' · Resin' : ''}${o.preis ? ` · ${fmt(o.preis, 2)} €` : ''}</small></span>
             ${o.status === 'offen' ? `<button class="btn ok" data-recv="${esc(o.id)}">✓ Erhalten</button>` : `<span class="done">${o.status === 'erhalten' ? `✓ ${dateDe(o.erhaltenAm)}` : 'storniert'}</span>`}
           </div>`).join('')}</div>
           <div class="row order-actions">
@@ -1236,7 +1249,7 @@
       }).join('') : `<p class="empty">${this.filter === 'offen' ? 'Keine offenen Bestellungen.' : 'Keine Bestellungen.'}</p>`;
     },
     fromItem(f, kat) {
-      return { kat, typ: f.typ, farbe: f.farbe, hersteller: f.hersteller, menge: Math.max(1, (f.mindestbestand || 0) - f.rollen + 1), kgProRolle: f.kgProRolle, durchmesser: f.durchmesser, preis: 0 };
+      return { kat, typ: f.typ, farbe: f.farbe, hersteller: f.hersteller, artnr: f.artnr || '', menge: Math.max(1, (f.mindestbestand || 0) - f.rollen + 1), kgProRolle: f.kgProRolle, durchmesser: f.durchmesser, preis: 0 };
     },
     open(bid, prefill, extra = []) {
       if (!key) return;
@@ -1268,6 +1281,7 @@
           <label class="w2">${zub ? 'Artikel' : 'Typ'}<input data-f="typ" list="odlTyp-${katOf(p.kat)}" value="${esc(p.typ)}" required autocomplete="off"></label>
           <label>Farbe<input data-f="farbe" list="odlFarbe" value="${esc(p.farbe)}" autocomplete="off"></label>
           <label>Hersteller<input data-f="hersteller" list="odlHersteller" value="${esc(p.hersteller)}" autocomplete="off"></label>
+          <label>Art.-Nr.<input data-f="artnr" value="${esc(p.artnr || '')}" autocomplete="off"></label>
           <label class="n">Menge<input data-f="menge" type="number" min="1" step="1" inputmode="numeric" value="${p.menge}"></label>
           ${zub ? '' : `<label class="n">kg/${p.kat === 'resin' ? 'Fl.' : 'Rolle'}<input data-f="kgProRolle" type="number" min="0.05" step="0.05" inputmode="decimal" value="${p.kgProRolle}"></label>`}
           <label class="n">Preis €<input data-f="preis" type="number" min="0" step="0.01" inputmode="decimal" value="${p.preis || ''}" placeholder="opt."></label>
@@ -1334,8 +1348,9 @@
           const id = ex ? ex.id : newId;
           ops.push([{ op: 'delta', coll: o.kat, id, d: o.menge }, txt, o.menge * o.kgProRolle]);
           undo.push([{ op: 'delta', coll: o.kat, id, d: -o.menge }]);
+          if (ex && o.artnr && !ex.artnr) ops.push([{ op: 'patch', coll: o.kat, id, fields: { artnr: o.artnr } }]);
         } else {
-          const item = { id: uid(), typ: o.typ, gruppe: o.kat === 'resin' ? o.typ : groupFor(o.typ), farbe: o.farbe, farbcode: '', hersteller: o.hersteller, rollen: o.menge, kgProRolle: o.kgProRolle, durchmesser: o.durchmesser, mindestbestand: 0, lagerort: '', bemerkung: '', mhd: '' };
+          const item = { id: uid(), typ: o.typ, gruppe: o.kat === 'resin' ? o.typ : groupFor(o.typ), farbe: o.farbe, farbcode: '', hersteller: o.hersteller, artnr: o.artnr, rollen: o.menge, kgProRolle: o.kgProRolle, durchmesser: o.durchmesser, mindestbestand: 0, lagerort: '', bemerkung: '', mhd: '' };
           if (o.kat === 'filamente' && !db.typen[o.typ]) ops.push([{ op: 'typ', typ: o.typ, gruppe: item.gruppe }]);
           ops.push([{ op: 'add', coll: o.kat, id: item.id, item }, txt + ' (neu angelegt)', o.menge * o.kgProRolle]);
           undo.push([{ op: 'del', coll: o.kat, id: item.id }]);
@@ -1360,6 +1375,7 @@
       $('#ordQ').addEventListener('input', e => { this.q = e.target.value; this.render(); });
       $('#orderList').addEventListener('click', e => {
         const b = e.target.closest('button'); if (!b) return;
+        if (b.dataset.copy) return copyText(b.dataset.copy, `Art.-Nr. ${b.dataset.copy} kopiert.`);
         if (b.dataset.recv) this.receive([b.dataset.recv]);
         else if (b.dataset.recvall) { const ids = db.bestellungen.filter(o => o.bid === b.dataset.recvall && o.status === 'offen').map(o => o.id); if (confirm(`${ids.length} Positionen als erhalten buchen?`)) this.receive(ids); }
         else if (b.dataset.edit) this.open(b.dataset.edit);
@@ -1400,7 +1416,7 @@
   const Shop = {
     sel: new Set(), editId: null,
     kat: () => $('#shopForm').elements.kat.value,
-    toPos: e => ({ kat: e.kat, typ: e.typ, farbe: e.farbe, hersteller: e.hersteller, menge: e.menge, kgProRolle: e.kgProRolle || (e.kat === 'zubehoer' ? 0 : 1), durchmesser: e.durchmesser, preis: 0, fromShop: e.id }),
+    toPos: e => ({ kat: e.kat, typ: e.typ, farbe: e.farbe, hersteller: e.hersteller, artnr: e.artnr, menge: e.menge, kgProRolle: e.kgProRolle || (e.kat === 'zubehoer' ? 0 : 1), durchmesser: e.durchmesser, preis: 0, fromShop: e.id }),
     /** Knappe Bestände, die weder auf der Liste stehen noch bestellt sind */
     lowItems() {
       const out = [];
@@ -1435,12 +1451,13 @@
           <input type="checkbox" class="rowsel" data-sel${this.sel.has(e.id) ? ' checked' : ''} aria-label="Auswählen">
           ${katIcon(e)}
           <button type="button" class="t" data-edit title="Bearbeiten"><b>${e.menge}×</b> ${esc(label(e))}
-            <small>${e.kat === 'zubehoer' ? 'Zubehör' : e.kat === 'resin' ? 'Resin · ' + fmt(e.kgProRolle) + ' kg' : fmt(e.kgProRolle) + ' kg'}${e.notiz ? ' · ' + esc(e.notiz) : ''}${e.wer ? ' · ' + esc(e.wer) : ''}</small></button>
+            ${e.artnr ? ` <span class="artnr" data-copy="${esc(e.artnr)}" title="Art.-Nr. kopieren">Art. ${esc(e.artnr)}</span>` : ''}<small>${e.kat === 'zubehoer' ? 'Zubehör' : e.kat === 'resin' ? 'Resin · ' + fmt(e.kgProRolle) + ' kg' : fmt(e.kgProRolle) + ' kg'}${e.notiz ? ' · ' + esc(e.notiz) : ''}${e.wer ? ' · ' + esc(e.wer) : ''}</small></button>
           <span class="qty"><button type="button" class="iconbtn" data-d="-1" aria-label="Weniger">−</button><button type="button" class="iconbtn" data-d="1" aria-label="Mehr">+</button></span>
           <button type="button" class="iconbtn del" data-del aria-label="Entfernen" title="Entfernen">🗑</button>
         </div>`).join('') : '<p class="empty small">Die Einkaufsliste ist leer. Oben Artikel eintragen – Filament, Resin oder Zubehör wie Düsen, Druckplatten, IPA …</p>';
       const n = this.sel.size, open = Orders.groups().filter(g => g.open.length);
       $('#shopActions').hidden = !L.length;
+      $('#shopCopy').textContent = n ? `📋 Ausgewählte kopieren` : '📋 Liste kopieren';
       $('#shopToNew').textContent = n ? `🛒 Ausgewählte bestellen (${n})` : `🛒 Alle bestellen (${L.length})`;
       $('#shopToOrder').hidden = !open.length;
       $('#shopToOrder').innerHTML = `<option value="">${n ? `Ausgewählte (${n})` : 'Alle'} zu offener Bestellung …</option>` +
@@ -1467,7 +1484,7 @@
     },
     submit() {
       const f = $('#shopForm'), el = f.elements;
-      const p = { kat: this.kat(), typ: el.typ.value.trim(), farbe: el.farbe.value.trim(), hersteller: el.hersteller.value.trim(), menge: num(el.menge.value) || 1, kgProRolle: num(el.kg.value), notiz: el.notiz.value.trim() };
+      const p = { kat: this.kat(), typ: el.typ.value.trim(), farbe: el.farbe.value.trim(), hersteller: el.hersteller.value.trim(), artnr: el.artnr.value.trim(), menge: num(el.menge.value) || 1, kgProRolle: num(el.kg.value), notiz: el.notiz.value.trim() };
       if (!p.typ) return;
       if (this.editId) {
         const it = normalizeShop({ ...db.einkauf.find(e => e.id === this.editId), ...p });
@@ -1480,7 +1497,7 @@
       const e = db.einkauf.find(x => x.id === id); if (!e) return;
       const el = $('#shopForm').elements;
       this.editId = id; el.kat.value = e.kat; this.updateForm();
-      el.typ.value = e.typ; el.farbe.value = e.farbe; el.hersteller.value = e.hersteller; el.menge.value = e.menge; el.kg.value = e.kgProRolle || ''; el.notiz.value = e.notiz;
+      el.typ.value = e.typ; el.farbe.value = e.farbe; el.hersteller.value = e.hersteller; el.artnr.value = e.artnr; el.menge.value = e.menge; el.kg.value = e.kgProRolle || ''; el.notiz.value = e.notiz;
       $('#shopSubmit').textContent = 'Speichern'; $('#shopCancelEdit').hidden = false;
       this.render(); $('#shopForm').scrollIntoView({ block: 'nearest', behavior: 'smooth' }); el.typ.focus();
     },
@@ -1497,6 +1514,7 @@
         const row = e.target.closest('.shop-item'); if (!row) return;
         const id = row.dataset.id, it = db.einkauf.find(x => x.id === id); if (!it) return;
         if (e.target.closest('[data-sel]')) { e.target.checked ? this.sel.add(id) : this.sel.delete(id); this.render(); return; }
+        const cp = e.target.closest('[data-copy]'); if (cp) { copyText(cp.dataset.copy, `Art.-Nr. ${cp.dataset.copy} kopiert.`); return; }
         const d = e.target.closest('[data-d]');
         if (d) { const m = it.menge + +d.dataset.d; if (m >= 1) commit({ op: 'patch', coll: 'einkauf', id, fields: { menge: m } }, ''); return; }
         if (e.target.closest('[data-del]')) {
@@ -1506,6 +1524,10 @@
           return;
         }
         if (e.target.closest('[data-edit]')) this.edit(id);
+      });
+      $('#shopCopy').addEventListener('click', () => {
+        const L = this.picked(); if (!L.length) return;
+        copyText(L.map(e => `${e.menge}× ${label(e)}${e.artnr ? ' – Art.-Nr. ' + e.artnr : ''}${e.notiz ? ' (' + e.notiz + ')' : ''}`).join('\n'), `${L.length} Zeile(n) kopiert.`);
       });
       $('#shopToNew').addEventListener('click', () => { const L = this.picked(); if (L.length) { Orders.open(null, L.map(this.toPos)); this.sel.clear(); } });
       $('#shopToOrder').addEventListener('change', e => {

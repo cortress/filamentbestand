@@ -66,7 +66,7 @@ Browser (Windows / Android / iPhone)
   "typen": { "PLA+ Matte": "PLA+", "TPU 95A": "TPU" },
   "filamente": [{
     "id": "f001", "typ": "ASA+", "gruppe": "ASA+", "farbe": "Schwarz", "farbcode": "",
-    "hersteller": "eSun", "rollen": 4, "kgProRolle": 1, "durchmesser": 1.75,
+    "hersteller": "eSun", "artnr": "ESUN-ASA-BK-1KG", "rollen": 4, "kgProRolle": 1, "durchmesser": 1.75,
     "mindestbestand": 0, "lagerort": "", "bemerkung": ""
   }],
   "resin": [{ "id": "…", "typ": "ABS-Like", "farbe": "Grau", "hersteller": "Elegoo", "rollen": 3, "kgProRolle": 1, "mhd": "2027-06" }],
@@ -228,6 +228,16 @@ Oben auf der Seite *Bestellungen* steht die **Einkaufsliste** – alles, was noc
 Datenmodell: `einkauf: [{ id, kat: "filamente|resin|zubehoer", typ, farbe, hersteller, menge, kgProRolle, durchmesser, notiz, wer, t }]`,
 Bestellpositionen haben zusätzlich `kat: "zubehoer"`. Operationen nutzen `coll: "einkauf"`.
 
+### Artikelnummer (Art.-Nr.)
+
+- Feld **Art.-Nr.** je Filament/Resin (Dialog „Bearbeiten“), eigene Spalte in der Liste (sortierbar, Handy: eigene Zeile auf der Karte),
+  durchsuchbar, im CSV-Export/-Import enthalten. **Antippen kopiert** die Nummer in die Zwischenablage (zum Einfügen im Shop).
+- Wird beim Nachbestellen (🛒, Mehrfachauswahl, Einkaufsliste) automatisch in die Bestellposition übernommen; Positionen und
+  Einkaufsliste haben ebenfalls ein Art.-Nr.-Feld.
+- Beim Wareneingang wird zuerst über die **Art.-Nr.** zugeordnet, dann über Typ/Farbe/Hersteller/Inhalt. Neu angelegte Einträge
+  übernehmen die Nummer; bestehende Einträge ohne Nummer bekommen sie beim Erhalt ergänzt.
+- **📋 Liste kopieren** in der Einkaufsliste kopiert „Menge× Artikel – Art.-Nr. …“ je Zeile (alle oder ausgewählte), z. B. für eine Bestell-E-Mail.
+
 ## 11. Geräte-Optimierung
 
 **Windows-PC**
@@ -294,6 +304,7 @@ Getestet (Playwright/Chromium): Desktop 1366×768 und 1400×1000, iPhone 13, Pix
 | Einkaufsliste: aus Bestand (2), Zubehör (Düse, IPA), Filament, Aufstocken gleicher Artikel, −/+, Bearbeiten, knappe Bestände übernehmen | ✔ Desktop & iPhone |
 | Ausgewählte → neue Bestellung, Rest → offene Bestellung anhängen, Chip „Aus Einkaufsliste“; Liste wird beim Speichern geleert | ✔ |
 | Erhalt: Filament ins Lager (neu/aufgestockt), Zubehör nur abgehakt, Verlauf | ✔ |
+| Art.-Nr.: speichern, Spalte/Handy-Zeile, kopieren, Suche; Übernahme in Bestellung; Erhalt ordnet über Art.-Nr. zu (Typ abweichend benannt → richtiger Eintrag 4 → 5); Einkaufsliste kopieren | ✔ Desktop & iPhone |
 
 Die KI-Erkennung wurde nicht live getestet (kein API-Key in der Testumgebung).
 

@@ -8,7 +8,7 @@ Daten **verschlüsselt** im Repository, **automatischer Sync** zwischen allen Ge
 
 ## Funktionen
 
-- Bestand mit Farbmuster, Sorte, Hersteller, Rollen (± für Verbrauch/Zugang), kg, Lagerort, Mindestbestand
+- Bestand mit Farbmuster, Sorte, Hersteller, Art.-Nr. (antippen = kopieren), Rollen (± für Verbrauch/Zugang), kg, Lagerort, Mindestbestand
 - Suche, Filter (Sorte, Farbe, Hersteller, „nur knapp“), Sortierung nach jeder Spalte
 - Auswahllisten für Typ/Sorte/Farbe/Hersteller, Sorte wird aus Typ vorgeschlagen
 - Ansicht „Typ & Farbe“ (wie in der Excel), Statistiken, Verlauf mit Namen der Person
