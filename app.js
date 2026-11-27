@@ -1604,13 +1604,16 @@
       if (!key) return;
       this.mode = 'load'; this.editId = null;
       const shelf = db.inUse.filter(u => !u.drucker), stock = db.filamente.filter(f => f.rollen > 0).sort((a, b) => label(a).localeCompare(label(b), 'de'));
-      if (!shelf.length && !stock.length) return toast('Keine Rollen im Lager vorhanden.', true);
       $('#useTitle').textContent = 'Rolle einlegen / öffnen';
       $('#useHead').innerHTML = '';
       $('#useSrcWrap').hidden = false; $('#useSrc').required = true;
       $('#useSrc').innerHTML = (shelf.length ? `<optgroup label="Angebrochen (Regal)">${shelf.map(u => `<option value="u:${esc(u.id)}">${esc(useLabel(u))} – ${u.rest} %</option>`).join('')}</optgroup>` : '')
-        + `<optgroup label="Neue Rolle aus dem Lager öffnen">${stock.map(f => `<option value="f:${esc(f.id)}">${esc(label(f))} · ${fmt(f.kgProRolle)} kg (${f.rollen} im Lager)</option>`).join('')}</optgroup>`;
+        + (stock.length ? `<optgroup label="Neue Rolle aus dem Lager öffnen">${stock.map(f => `<option value="f:${esc(f.id)}">${esc(label(f))} · ${fmt(f.kgProRolle)} kg (${f.rollen} im Lager)</option>`).join('')}</optgroup>` : '')
+        + `<optgroup label="Nicht im Lager"><option value="new">＋ Neue Rolle erfassen (nicht im Bestand) …</option></optgroup>`;
       if (src) $('#useSrc').value = src;
+      else if (!shelf.length && !stock.length) $('#useSrc').value = 'new';
+      const nf = $('#useForm').elements; nf.nTyp.value = ''; nf.nFarbe.value = ''; nf.nHersteller.value = ''; nf.nKg.value = 1; nf.nStock.checked = true;
+      Shop.fillDatalists(); this.toggleNew(); this.presetRest();
       $('#usePlace').innerHTML = this.placeOptions(null);
       $('#usePlace').value = place || (db.drucker.length ? this.firstFree() : '');
       this.syncRest(); $('#useExtra').hidden = true;
@@ -1625,7 +1628,7 @@
       this.mode = 'edit'; this.editId = id;
       $('#useTitle').textContent = 'Geöffnete Rolle';
       $('#useHead').innerHTML = `${swatch(u)}<b>${esc(useLabel(u))}</b><small>${esc(placeText(u))}${u.geoeffnet ? ' · geöffnet ' + new Date(u.geoeffnet).toLocaleDateString('de-DE') : ''}</small>`;
-      $('#useSrcWrap').hidden = true; $('#useSrc').required = false; $('#useSrc').innerHTML = '';
+      $('#useSrcWrap').hidden = true; $('#useSrc').required = false; $('#useSrc').innerHTML = ''; this.toggleNew();
       $('#usePlace').innerHTML = this.placeOptions(id);
       $('#usePlace').value = u.drucker ? `${u.drucker}|${u.slot}` : '';
       $('#useRest').value = u.rest; this.syncRest();
@@ -1633,17 +1636,26 @@
       $('#useBack').hidden = !(u.rest === 100 && db.filamente.some(f => f.id === u.ref));
       $('#useDlg').showModal();
     },
+    isNew() { return this.mode === 'load' && $('#useSrc').value === 'new'; },
+    toggleNew() {
+      const on = this.isNew();
+      $('#useNew').hidden = !on; $('#nTyp').required = on;
+      if (on) setTimeout(() => $('#nTyp').focus(), 0);
+    },
     srcItem() {
       if (this.mode === 'edit') return db.inUse.find(x => x.id === this.editId);
       const v = $('#useSrc').value || '';
+      if (v === 'new') return { kgProRolle: num($('#useForm').elements.nKg.value) || 1 };
       return v.startsWith('u:') ? db.inUse.find(x => x.id === v.slice(2)) : db.filamente.find(x => x.id === v.slice(2));
     },
+    /** Restmenge nur beim Wechsel der Rolle vorbelegen (neue Rolle 100 %, angebrochene ihr Stand) */
+    presetRest() {
+      if (this.mode !== 'load') return;
+      const v = $('#useSrc').value || '';
+      $('#useRest').value = v.startsWith('u:') ? (db.inUse.find(x => x.id === v.slice(2))?.rest ?? 100) : 100;
+      this.syncRest();
+    },
     syncRest() {
-      if (this.mode === 'load') {
-        const v = $('#useSrc').value || '';
-        if (v.startsWith('f:')) $('#useRest').value = 100;
-        else if (v.startsWith('u:')) $('#useRest').value = db.inUse.find(x => x.id === v.slice(2))?.rest ?? 100;
-      }
       const it = this.srcItem(), r = +$('#useRest').value;
       $('#useRestOut').textContent = r;
       $('#useRestKg').textContent = it ? `${fmt(r / 100 * it.kgProRolle * 1000, 0)} g von ${fmt(it.kgProRolle * 1000, 0)} g` : '';
@@ -1659,7 +1671,27 @@
       const where = pid ? `${printerName(pid)} · ${sl}` : 'Regal';
       if (this.mode === 'load') {
         const v = $('#useSrc').value || '';
-        if (v.startsWith('f:')) {
+        if (v === 'new') {
+          const el = $('#useForm').elements, typ = el.nTyp.value.trim();
+          if (!typ) { toast('Bitte einen Typ angeben.', true); return false; }
+          const base = { typ, farbe: el.nFarbe.value.trim(), hersteller: el.nHersteller.value.trim(), kgProRolle: num(el.nKg.value) || 1, durchmesser: 1.75 };
+          const gruppe = groupFor(typ);
+          let ref = '';
+          if (el.nStock.checked) {
+            // vorhandenen (leeren) Lagereintrag verwenden, sonst neu mit 0 Rollen anlegen
+            const ex = matchStock('filamente', base);
+            if (ex) ref = ex.id;
+            else {
+              const item = { id: uid(), ...base, gruppe, farbcode: '', artnr: '', rollen: 0, mindestbestand: 0, lagerort: '', bemerkung: '' };
+              if (!db.typen[typ]) ops.push([{ op: 'typ', typ, gruppe }]);
+              ops.push([{ op: 'add', coll: 'filamente', id: item.id, item }, `Neu in Filamentliste (0 Rollen): ${label(item)}`, 0]);
+              ref = item.id;
+            }
+          }
+          if (pid) ops.push(...this.evictOps(pid, sl));
+          const nu = normalizeUse({ ...base, ref, gruppe, rest, drucker: pid, slot: sl, geoeffnet: new Date().toISOString() });
+          ops.push([{ op: 'add', coll: 'inUse', id: nu.id, item: nu }, `Neue Rolle (nicht aus Lager) eingelegt: ${label(nu)} → ${where}`, 0]);
+        } else if (v.startsWith('f:')) {
           const f = db.filamente.find(x => x.id === v.slice(2)); if (!f || f.rollen < 1) return toast('Diese Rolle ist nicht mehr im Lager.', true);
           if (pid) ops.push(...this.evictOps(pid, sl));
           const nu = normalizeUse({ ref: f.id, typ: f.typ, gruppe: f.gruppe, farbe: f.farbe, farbcode: f.farbcode, hersteller: f.hersteller, kgProRolle: f.kgProRolle, durchmesser: f.durchmesser, rest, drucker: pid, slot: sl, geoeffnet: new Date().toISOString() });
@@ -1696,10 +1728,12 @@
       $('#useDlg').close(); toast('Zurück im Lager.');
     },
     bind() {
-      $('#useSrc').addEventListener('change', () => this.syncRest());
+      $('#useSrc').addEventListener('change', () => this.presetRest());
       $('#useRest').addEventListener('input', () => this.syncRest());
       $('#useQuick').addEventListener('click', e => { const b = e.target.closest('[data-r]'); if (b) { $('#useRest').value = b.dataset.r; this.syncRest(); } });
-      $('#useForm').addEventListener('submit', e => { if (e.submitter?.value === 'ok') this.save(); });
+      $('#useForm').addEventListener('submit', e => { if (e.submitter?.value === 'ok' && this.save() === false) e.preventDefault(); });
+      $('#useSrc').addEventListener('change', () => this.toggleNew());
+      $('#useForm').elements.nKg.addEventListener('input', () => this.syncRest());
       $('#useEmpty').addEventListener('click', () => this.empty());
       $('#useBack').addEventListener('click', () => this.back());
       $('#useDlg').addEventListener('click', e => { if (e.target === $('#useDlg')) $('#useDlg').close(); });

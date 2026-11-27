@@ -199,6 +199,12 @@ Eigener Tab mit derselben Tabelle wie Filament (Suche, Filter, Sortierung, Auswa
 - KPIs: geöffnete Rollen, Rest gesamt, im Drucker, freie Plätze, fast leer (≤ 15 %); der Filament-Tab zeigt zusätzlich „In Verwendung“.
 - Datenmodell: `inUse[]` (Typ, Farbe, Hersteller, kg/Rolle, `rest` %, `drucker`, `slot`, `geoeffnet`, `ref` → Lagereintrag) und `drucker[]`; alle Änderungen als Operationen mit Merge.
 
+**Neue Rolle, die nicht im Lager ist:** Im Dialog „Rolle einlegen“ gibt es unter *Nicht im Lager* die Option **＋ Neue Rolle erfassen**
+(automatisch gewählt, wenn das Lager leer ist). Typ, Farbe, Hersteller und kg/Rolle werden direkt eingegeben (mit Vorschlagslisten).
+Standardmäßig wird zusätzlich ein Eintrag in der Filamentliste mit **0 Rollen** angelegt (bzw. ein vorhandener gleicher Eintrag verwendet),
+damit die Sorte im Bestand auftaucht und nachbestellt werden kann; abwählbar. Es wird nichts vom Lager abgebucht.
+Die Schnellwahl der Restmenge (100/75/50/25/10 %) bleibt jetzt erhalten; vorbelegt wird nur beim Wechsel der Rolle.
+
 ## 10. Bestellungen
 
 - **Erfassen:** „+ Bestellung“ oder direkt aus dem Bestand: 🛒 je Zeile bzw. Mehrfachauswahl → „🛒 Bestellen“ (vorbefüllt; Menge = bis über den Mindestbestand).
@@ -304,6 +310,7 @@ Getestet (Playwright/Chromium): Desktop 1366×768 und 1400×1000, iPhone 13, Pix
 | Einkaufsliste: aus Bestand (2), Zubehör (Düse, IPA), Filament, Aufstocken gleicher Artikel, −/+, Bearbeiten, knappe Bestände übernehmen | ✔ Desktop & iPhone |
 | Ausgewählte → neue Bestellung, Rest → offene Bestellung anhängen, Chip „Aus Einkaufsliste“; Liste wird beim Speichern geleert | ✔ |
 | Erhalt: Filament ins Lager (neu/aufgestockt), Zubehör nur abgehakt, Verlauf | ✔ |
+| Neue Rolle (nicht im Lager) in Drucker: Eintrag mit 0 Rollen angelegt, 2. gleiche Rolle ohne Duplikat, ohne Lagereintrag möglich, Pflichtfeld Typ, Rest 75 % bleibt | ✔ Desktop & iPhone |
 | Art.-Nr.: speichern, Spalte/Handy-Zeile, kopieren, Suche; Übernahme in Bestellung; Erhalt ordnet über Art.-Nr. zu (Typ abweichend benannt → richtiger Eintrag 4 → 5); Einkaufsliste kopieren | ✔ Desktop & iPhone |
 
 Die KI-Erkennung wurde nicht live getestet (kein API-Key in der Testumgebung).

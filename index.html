@@ -311,6 +311,14 @@
       <div class="dlg-head"><h2 id="useTitle">Rolle einlegen</h2><button class="iconbtn" value="cancel" formnovalidate aria-label="Schließen">✕</button></div>
       <div class="use-head" id="useHead"></div>
       <label id="useSrcWrap">Rolle <select name="src" id="useSrc" required></select></label>
+      <fieldset class="use-new" id="useNew" hidden>
+        <legend>Neue Rolle – noch nicht im Bestand</legend>
+        <label>Typ <input name="nTyp" id="nTyp" list="odlTyp-filamente" autocomplete="off" placeholder="z. B. PLA+"></label>
+        <label>Farbe <input name="nFarbe" list="odlFarbe" autocomplete="off"></label>
+        <label>Hersteller <input name="nHersteller" list="odlHersteller" autocomplete="off"></label>
+        <label>kg je Rolle <input name="nKg" type="number" min="0.05" step="0.05" inputmode="decimal" value="1" list="kgList"></label>
+        <label class="toggle full"><input type="checkbox" name="nStock" checked> <span>Auch in die Filamentliste aufnehmen (0 Rollen im Lager – z. B. zum Nachbestellen)</span></label>
+      </fieldset>
       <label>Ort <select name="place" id="usePlace"></select></label>
       <label>Restmenge <span class="rest-val"><b id="useRestOut">100</b> % · <span id="useRestKg"></span></span>
         <input type="range" name="rest" id="useRest" min="0" max="100" step="5" value="100">
